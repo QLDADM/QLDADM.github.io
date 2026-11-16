@@ -1,0 +1,1663 @@
+<!doctype html>
+<html lang="pl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0f1419">
+<title>Dron Detector</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" type="image/png" href="favicon.png">
+<link rel="apple-touch-icon" href="icon-192.png">
+<style>
+  :root {
+    --bg: #0f1419; --panel: #161d24; --panel2: #1d262f; --line: #2a3540;
+    --text: #dbe4ec; --muted: #8a99a8; --accent: #3fb6ff;
+    --ok: #3ccf7a; --warn: #f0b429; --bad: #ff4d4f; --op: #c77dff;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--bg); color: var(--text);
+    font: 15px/1.4 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  body { padding: 0 8px calc(8px + env(safe-area-inset-bottom)); }
+  header { position: relative; background: var(--bg); padding: 5px 0; display: flex; align-items: center; gap: 6px 8px; flex-wrap: wrap;
+    border-bottom: 1px solid var(--line); }
+  h1 { font-size: 15px; margin: 0; white-space: nowrap; }
+  h1 .logo { width: 24px; height: 24px; vertical-align: -6px; margin-right: 6px; border-radius: 6px; }
+  header > button { padding: 6px 9px; }
+  button { background: var(--panel2); color: var(--text); border: 1px solid var(--line); border-radius: 8px;
+    padding: 9px 13px; font-size: 14px; cursor: pointer; }
+  button.primary { background: var(--accent); color: #04121c; border-color: var(--accent); font-weight: 600; }
+  button.own { border-color: var(--ok); color: var(--ok); }
+  button.foreign { border-color: var(--bad); color: var(--bad); }
+  button.own.active { background: var(--ok); color: #0f1419; font-weight: 700; }
+  button.foreign.active { background: var(--bad); color: #fff; font-weight: 700; }
+  button:disabled { opacity: .5; }
+  .pill { font-size: 12px; padding: 2px 9px; border-radius: 10px; border: 1px solid var(--line); background: var(--panel2); }
+  .pill.on { color: var(--ok); border-color: var(--ok); }
+  .pill.off { color: var(--bad); border-color: var(--bad); }
+  /* bez pozycji GPS znacznik w nagłówku miga na czerwono (zamiast napisu na radarze) */
+  .pill.gpsbad { color: #fff; background: var(--bad); border-color: var(--bad); font-weight: 600; animation: gpsblink 1s steps(2, start) infinite; }
+  @keyframes gpsblink { 50% { opacity: .35; } }
+  .bar { display: flex; flex-wrap: wrap; gap: 6px 12px; padding: 8px 0; color: var(--muted); font-size: 13px; }
+  .bar b { color: var(--text); font-weight: 600; }
+  .note { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px;
+    margin: 10px 0; font-size: 14px; }
+  .note.bad { border-color: var(--bad); }
+  .alert { background: var(--bad); color: #fff; border-radius: 10px; padding: 10px 12px; margin: 10px 0;
+    font-weight: 600; display: flex; justify-content: space-between; gap: 8px; align-items: center; }
+  /* alarmy na wierzchu (prawy górny róg), nie spychają mapy; najwyżej 3 naraz */
+  #alerts { position: fixed; top: 52px; right: 8px; z-index: 2500; width: min(420px, calc(100% - 16px));
+    display: flex; flex-direction: column; gap: 6px; pointer-events: none; }
+  #alerts .alert { margin: 0; padding: 8px 10px; pointer-events: auto; box-shadow: 0 4px 14px rgba(0, 0, 0, .5); }
+  .alert button { background: rgba(0,0,0,.25); color: #fff; border-color: rgba(255,255,255,.4); padding: 5px 10px; }
+  /* prawa kolumna: widok 3D i radar - dwa równe panele; tytuł i przycisk leżą na obrazie, legenda pod spodem */
+  #right { display: flex; flex-direction: column; gap: 8px; min-width: 0; min-height: 0; }
+  #v3panel, #radarpanel { position: relative; flex: 1 1 0; min-height: 0; display: flex; overflow: hidden; border-radius: 10px;
+    border: 1px solid rgba(60, 207, 122, .4); background: radial-gradient(ellipse at 50% 60%, #06220f 0%, #02100a 70%, #010805 100%); }
+  .ptitle { position: absolute; top: 6px; left: 10px; right: 6px; z-index: 2; margin: 0; pointer-events: none;
+    font: 600 12px ui-monospace, Consolas, monospace; letter-spacing: .08em; color: #3ccf7a; display: flex; justify-content: space-between; gap: 8px; }
+  .ptitle small { color: var(--muted); font-weight: 400; letter-spacing: 0; }
+  .ptitle span { display: flex; align-items: center; gap: 6px; }
+  .ptitle .popout { pointer-events: auto; padding: 0 7px; font-size: 14px; line-height: 20px; border-radius: 6px; background: rgba(1, 10, 5, .75); }
+  #view3d { flex: 1; min-width: 0; min-height: 0; width: 100%; height: 100%; display: block; touch-action: none; cursor: grab; }
+  #view3d:active { cursor: grabbing; }
+  /* radar: największe koło, jakie mieści się w panelu (radar.js fitRadar) */
+  #rbox { flex: 1; min-width: 0; min-height: 0; margin: 3px; display: flex; align-items: center; justify-content: center; }
+  .rlegend { flex: none; display: flex; flex-wrap: wrap; justify-content: center; gap: 4px 10px; font-size: 12px; color: var(--muted); }
+  .rlegend i { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 4px; vertical-align: -1px; }
+  .rlegend i.sq { border-radius: 0; background: var(--op); }
+  #radarwrap { position: relative; pointer-events: none;
+    background: radial-gradient(circle, rgba(6, 34, 18, .93) 0%, rgba(2, 16, 8, .93) 75%, rgba(1, 8, 4, .95) 100%);
+    border: 1px solid rgba(60, 207, 122, .55); border-radius: 50%; box-shadow: 0 0 10px rgba(60, 207, 122, .25); }
+  #radar { width: 100%; height: auto; display: block; aspect-ratio: 1; }
+  #radarbox { position: relative; }
+  /* wiązka tylko wizualna: nic nie skanuje kierunku, pozycje dronów pochodzą z ich Remote ID */
+  #sweep { position: absolute; inset: 4.545%; border-radius: 50%; pointer-events: none;
+    background: conic-gradient(rgba(60,207,122,0) 0deg 270deg, rgba(60,207,122,.28) 357deg, rgba(150,255,190,.95) 360deg); }
+  /* pierścień przy przejściu wiązki: animacja w radar.js, tu środek skalowania */
+  .ping { transform-box: fill-box; transform-origin: center; }
+  #radarmsg { position: absolute; left: 50%; transform: translateX(-50%); bottom: 24%; color: #9fe8bd; font-size: 11px;
+    white-space: nowrap; background: rgba(1, 10, 5, .85); border-radius: 4px; padding: 1px 6px; }
+  #radarmsg:empty { display: none; }
+  #bandwrap { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  #bandnote { grid-column: 1 / -1; color: var(--muted); font-size: 11px; }
+  .band { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 5px 8px; min-width: 0; }
+  .band.stale { opacity: .55; }
+  .band h4 { margin: 0 0 2px; font-size: 13px; display: flex; justify-content: space-between; gap: 8px; }
+  .band h4 small { color: var(--muted); font-weight: 400; }
+  .bchart { display: flex; gap: 2px; align-items: flex-end; overflow-x: auto; }
+  .bcol { flex: 1 0 18px; min-width: 18px; text-align: center; font-size: 10px; color: var(--muted); }
+  .bcol .bbox { height: 40px; display: flex; flex-direction: column; justify-content: flex-end; background: var(--panel2); border-radius: 3px; }
+  .bcol i { display: block; background: var(--accent); border-radius: 3px 3px 0 0; }
+  .bcol b { display: block; color: var(--text); font-weight: 400; height: 13px; }
+  /* kanał, na którym teraz słychać drona */
+  .bcol.hit { color: var(--bad); font-weight: 700; }
+  .bcol.hit .bbox { box-shadow: inset 0 0 0 2px var(--bad); }
+  .bandempty { color: var(--muted); font-size: 13px; text-align: center; padding: 14px 0; }
+  /* mapa ciepła pasm: wiersz na walizkę, kratka na kanał (jasność = ramki/s, liczba = najsilniejszy sygnał) */
+  .hm { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 5px 8px; min-width: 0; }
+  .hm h4 { margin: 0 0 3px; font-size: 13px; display: flex; justify-content: space-between; gap: 8px; }
+  .hm h4 small { color: var(--muted); font-weight: 400; }
+  .hmgrid { display: grid; gap: 2px; }
+  .hmgrid .lab { font: 600 11px/18px ui-monospace, Consolas, monospace; color: var(--text); }
+  .hmgrid .chn { font-size: 10px; color: var(--muted); text-align: center; line-height: 13px; overflow: hidden; }
+  .hmgrid .cell { height: 18px; border-radius: 3px; background: var(--panel2); font-size: 9px; line-height: 18px; text-align: center;
+    color: #dbe4ec; overflow: hidden; white-space: nowrap; }
+  .hmgrid .cell.dark { color: #04121c; font-weight: 600; }
+  .hmgrid .cell.hit { box-shadow: inset 0 0 0 2px var(--bad); }
+  .hmgrid .chn.hit { color: var(--bad); font-weight: 700; }
+  .hmgrid .none { font-size: 11px; color: var(--muted); line-height: 18px; padding-left: 4px; }
+  #bandbar .bsite { font-weight: 600; margin-right: 3px; }
+  /* pasek pasm: zwinięty = jedna linia ze stanem i kanałami z dronem */
+  #bandbar { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 2px 10px; align-items: center; cursor: pointer; user-select: none;
+    background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 4px 10px; font-size: 12px; color: var(--muted); }
+  #bandbar > b:first-child { color: var(--text); }
+  #bandbar .hitch { color: var(--bad); font-weight: 700; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-left: 4px solid var(--warn);
+    border-radius: 10px; padding: 10px 12px; margin: 8px 0; }
+  .card.own { border-left-color: var(--ok); }
+  .card.foreign { border-left-color: var(--bad); }
+  .card.stale { opacity: .55; }
+  .card.sel { box-shadow: 0 0 0 2px var(--accent); }  /* dron wybrany na liście albo na mapie */
+  .top { display: flex; justify-content: space-between; gap: 8px; align-items: baseline; }
+  .uid { font-weight: 600; font-family: ui-monospace, Consolas, monospace; word-break: break-all; }
+  .tag { font-size: 11px; padding: 1px 8px; border-radius: 9px; font-weight: 700; white-space: nowrap; }
+  .tag.own { background: var(--ok); color: #0f1419; }
+  .tag.foreign { background: var(--bad); color: #fff; }
+  .tag.none { border: 1px solid var(--line); color: var(--muted); font-weight: 400; }
+  .nums { display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 2px 12px;
+    margin-top: 6px; font-size: 14px; color: var(--muted); }
+  .nums b { color: var(--text); }
+  .dist { font-size: 18px; color: var(--text); font-weight: 700; }
+  .arrow { display: inline-block; transition: transform .3s; }
+  .more { margin-top: 10px; display: flex; flex-direction: column; gap: 8px; }
+  .more input { background: var(--panel2); color: var(--text); border: 1px solid var(--line); border-radius: 8px;
+    padding: 9px 10px; font-size: 15px; width: 100%; }
+  .row { display: flex; gap: 8px; flex-wrap: wrap; }
+  .row a { color: var(--accent); }
+  .empty { color: var(--muted); text-align: center; padding: 26px 8px; }
+  label.chk { color: var(--muted); font-size: 13px; display: flex; align-items: center; gap: 5px; }
+  select { background: var(--panel2); color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 2px 4px; font-size: 13px; }
+  #mapwrap { border: 1px solid var(--line); border-radius: 10px; overflow: hidden; position: relative; }
+  #map { height: 55vh; min-height: 280px; background: #0b0f13; }
+  #mapmsg { position: absolute; left: 8px; right: 8px; top: 8px; z-index: 1000; margin: 0; }
+  #fit { position: absolute; left: 56px; top: 10px; z-index: 1000; padding: 6px 10px; }
+  .pickbox { display: flex; flex-direction: column; }
+  .pickbox .pickme { width: 34px; height: 34px; padding: 0; border: 0; border-radius: 0; font-size: 17px; line-height: 34px; background: #fff; color: #000; cursor: pointer; }
+  .pickbox .pickme + .pickme { border-top: 1px solid #ccc; }
+  .pickbox .pickclear { font-size: 15px; color: #c00; }
+  .pickbox .pickme[hidden] { display: none; }
+  .pickbox .pickme.on { background: var(--accent); }
+  #map.picking, #map.picking .leaflet-interactive { cursor: crosshair; }
+  .dicon svg { width: 30px; height: 30px; filter: drop-shadow(0 0 2px #000); }
+  .oicon { width: 14px; height: 14px; background: var(--op); border: 2px solid #000; }
+  .leaflet-tooltip.lbl { background: rgba(15, 20, 25, .85); color: var(--text); border: 1px solid var(--line);
+    font: 11px ui-monospace, Consolas, monospace; padding: 1px 5px; box-shadow: none; }
+  .leaflet-tooltip.lbl::before { display: none; }
+  /* nagłówek w jednej linii: pigułka na płytkę / walizkę, szczegóły w panelu rozwijanym (nie zabiera miejsca mapie) */
+  #boards { display: grid; flex: 1; grid-template-columns: repeat(auto-fill, minmax(168px, 1fr)); gap: 5px; min-width: 0; }
+  /* kafelek: 1. wiersz - nazwa i najważniejszy stan, 2. wiersz - szczegóły; problemy na czerwono */
+  button.dev { display: flex; flex-direction: column; align-items: stretch; gap: 1px; padding: 4px 8px; font-size: 13px;
+    border-radius: 9px; text-align: left; min-width: 0; }
+  button.dev .l1, button.dev .l2 { display: flex; align-items: center; gap: 5px; white-space: nowrap; overflow: hidden; }
+  button.dev .l1 b { font-weight: 600; }
+  button.dev .l1 small { margin-left: auto; }
+  button.dev .l2 { font-size: 12px; }
+  button.dev small { color: var(--muted); }
+  button.dev .l2 small + small::before { content: "·"; margin-right: 5px; color: var(--line); }
+  button.dev small.bad { color: var(--bad); font-weight: 600; }
+  button.dev small.sim, #lokinfo .sim { color: var(--warn); font-weight: 700; }
+  /* ustawienia LoRa sieci w panelu Heltec-MAIN */
+  .lcfg { flex-basis: 100%; display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: center; border-top: 1px dashed var(--line);
+    padding-top: 6px; margin-top: 2px; }
+  .lcfg input { width: 64px; background: var(--panel2); color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 2px 6px; font-size: 13px; }
+  .lcfg .lst { flex-basis: 100%; color: var(--warn); }
+  button.dev .l1 small.sim { margin-left: 0; }
+  button.dev .l2 i { display: inline-block; width: 7px; height: 7px; margin-right: 4px; vertical-align: 0; }  /* kropka pasma C5 */
+  button.dev i { width: 9px; height: 9px; border-radius: 50%; background: var(--muted); flex: none; }
+  button.dev i.on { background: var(--ok); }
+  button.dev i.wait { background: var(--warn); }
+  button.dev i.off { background: var(--bad); }
+  button.dev.open { border-color: var(--accent); }
+  #devpanel { position: absolute; left: 0; right: 0; top: 100%; z-index: 3000; background: var(--bg); border: 1px solid var(--line);
+    border-top: 0; border-radius: 0 0 10px 10px; padding: 8px; display: flex; flex-direction: column; gap: 6px; max-height: 70vh;
+    overflow-y: auto; box-shadow: 0 10px 24px rgba(0, 0, 0, .55); }
+  #devpanel[hidden] { display: none; }
+  #devpanel .dphead { display: flex; justify-content: space-between; align-items: center; color: var(--muted); font-size: 12px; }
+  #devpanel .dphead button { padding: 2px 9px; }
+  .board { display: flex; align-items: center; gap: 5px 10px; flex-wrap: wrap; background: var(--panel); border: 1px solid var(--line);
+    border-radius: 8px; padding: 5px 6px 5px 10px; font-size: 13px; color: var(--muted); }
+  .board b { color: var(--text); font-weight: 600; }
+  .board .bn { color: var(--text); font-weight: 600; font-family: ui-monospace, Consolas, monospace; }
+  .board button { padding: 3px 9px; font-size: 13px; }
+  .board .acts { margin-left: auto; display: flex; gap: 5px; }
+  .board.site { border-style: dashed; }
+  .sicon { background: #0f1419; color: #fff; border: 2px solid var(--accent); border-radius: 6px; text-align: center;
+    font: 700 11px/18px ui-monospace, Consolas, monospace; box-shadow: 0 0 3px #000; }
+  .sicon.off { border-color: var(--bad); color: var(--muted); }
+  .est { margin-top: 6px; color: #ff9d2e; }
+  #lokinfo { color: var(--muted); font-size: 12px; margin: 8px 0 0; }
+  #lokinfo:empty { display: none; }
+  #lokinfo button { padding: 1px 7px; font-size: 12px; }
+  #msgs:empty { display: none; }
+  #msgs .note, #msgs .alert { margin: 6px 0 0; padding: 6px 10px; }
+  main { display: grid; gap: 8px; margin-top: 8px; }
+  #side { min-width: 0; }
+  #side .bar { padding: 0 0 6px; }
+  #side .row { margin-top: 8px; }
+  #side .row button { padding: 5px 9px; font-size: 13px; }
+  #sidenote { color: var(--muted); font-size: 12px; margin: 8px 0 0; }
+  /* tablet poziomo: wszystko na jednym ekranie, przewija się tylko lista */
+  @media (min-width: 900px) {
+    html, body { height: 100%; }
+    body { display: flex; flex-direction: column; overflow: hidden; }
+    main { flex: 1; min-height: 0; grid-template: minmax(0, 1fr) auto / 340px minmax(0, 1fr) 300px;
+      grid-template-areas: "side map right" "bands bands bands"; }
+    #mapwrap { grid-area: map; }
+    #right { grid-area: right; }
+    #map { height: 100%; min-height: 0; }
+    #side { grid-area: side; display: flex; flex-direction: column; min-height: 0; }
+    #sidescroll { flex: 1; min-height: 0; overflow-y: auto; }
+    #bandwrap { grid-area: bands; }
+  }
+  @media (max-width: 899px) {
+    #boards { order: 5; flex: 1 0 100%; grid-template-columns: repeat(auto-fill, minmax(165px, 1fr)); }
+    #alerts { top: auto; bottom: calc(8px + env(safe-area-inset-bottom)); }  /* nie zasłaniają nagłówka z przyciskami */
+    #bandwrap { grid-template-columns: 1fr; }
+    #view3d { flex: none; width: 100%; height: auto; aspect-ratio: 224 / 190; }
+    #rbox { flex: 1 1 auto; height: min(92vw, 340px); }  /* cała szerokość panelu - koło na środku */
+    #v3panel, #radarpanel { flex: none; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1 title="Dron Detector, wersja strony 1.0"><img src="favicon.png" alt="" class="logo">RID</h1>
+  <div id="boards"><span id="noboard" class="pill off">nie połączono</span></div>
+  <span id="gps" class="pill gpsbad">GPS: —</span>
+  <button id="connect" class="primary">Połącz</button>
+  <button id="disconnectall" disabled>Rozłącz</button>
+  <button id="addboard" disabled title="Dodaj płytkę">+ płytka</button>
+  <div id="devpanel" hidden></div>
+</header>
+<div id="support" class="note bad" hidden></div>
+<div id="pinhint" class="note" style="margin:6px 0 0;padding:6px 10px">Przy pierwszym połączeniu urządzenie zapyta o <b>PIN</b>. Heltec pokazuje go na ekranie
+  w trakcie parowania, CYD na górnym pasku i w Ustawieniach. Potem łączy się już bez PIN-u.</div>
+<div id="boardhints"></div>
+<div id="alerts"></div>
+
+<main>
+  <section id="mapwrap">
+    <div id="map"></div>
+    <div id="mapmsg" class="note" hidden></div>
+    <button id="fit" title="Pokaż wszystkie drony i tablet">Dopasuj</button>
+  </section>
+  <aside id="side">
+    <div class="bar">
+      <label class="chk"><input type="checkbox" id="sound" checked> dźwięk</label>
+      <label class="chk"><input type="checkbox" id="wake"> ekran nie gaśnie</label>
+      <label class="chk"><input type="checkbox" id="hideown"> ukryj swoje</label>
+      <label class="chk" title="Drony bez sygnału dłużej znikają z listy (oprócz przypiętych 📌 i historii z płytki)">usuń nieaktywne po
+        <select id="ttl"><option value="300">5 min</option><option value="1800">30 min</option><option value="0">nigdy</option></select></label>
+    </div>
+    <div id="sidescroll">
+    <div id="list"><div class="empty">Połącz się z płytką Heltec albo CYD, żeby zobaczyć drony w zasięgu.</div></div>
+    <div class="row">
+      <button id="clearlist">Wyczyść listę</button>
+      <button id="histreload" title="Pobierz ponownie historię z pamięci Heltec">Odśwież historię</button>
+      <button id="histclear" class="foreign" title="Kasuje historię dronów zapisaną w Heltec">Wyczyść historię</button>
+    </div>
+    <div id="lokinfo"></div>
+    <p id="sidenote">Na Androidzie użyj Chrome, na iPhonie Bluefy. Oznaczenia swój/obcy trafiają do wszystkich połączonych płytek. Odległości liczone są z GPS tego urządzenia.<br>Dron Detector · wersja strony 1.0</p>
+    </div>
+  </aside>
+  <section id="right">
+    <div id="v3panel">
+      <h3 class="ptitle">WIDOK 3D <span><small id="v3info"></small><button class="popout" data-view="3d" title="Otwórz w nowej karcie na cały ekran">⤢</button></span></h3>
+      <svg id="view3d" viewBox="-112 -125 224 190"></svg>
+    </div>
+    <div id="radarpanel">
+      <h3 class="ptitle">RADAR <span><small id="radarscale"></small><button class="popout" data-view="radar" title="Otwórz w nowej karcie na cały ekran">⤢</button></span></h3>
+      <div id="rbox"><div id="radarwrap"><div id="radarbox"><svg id="radar" viewBox="-110 -110 220 220"></svg><div id="sweep"></div><div id="radarmsg"></div></div></div></div>
+    </div>
+    <div class="rlegend"><span><i style="background:var(--ok)"></i>swój</span><span><i style="background:var(--bad)"></i>obcy</span>
+        <span><i style="background:var(--warn)"></i>nieoznaczony</span><span><i class="sq"></i>operator</span></div>
+  </section>
+  <section id="bandwrap"></section>
+</main>
+
+<script src="agl.js"></script>
+<script src="radar.js"></script>
+<script src="lok.js"></script>
+<script>
+"use strict";
+const NUS = "6e400001-b5a3-f393-e0a9-e50e24dcca9e";
+const NUS_RX = "6e400002-b5a3-f393-e0a9-e50e24dcca9e";
+const NUS_TX = "6e400003-b5a3-f393-e0a9-e50e24dcca9e";
+const STALE_S = 30;          // bez nowych danych dłużej - dron szary
+const REALERT_S = 300;       // ten sam dron alarmuje ponownie po 5 min nieobecności
+
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const fmt = (v, unit = "", d = 0) => (v === undefined || v === null ? "—" : `${Number(v).toFixed(d)}${unit}`);
+const store = {
+  get(k, def) { try { return JSON.parse(localStorage.getItem(k)) ?? def; } catch { return def; } },
+  set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch { /* tryb prywatny */ } },
+};
+
+// kilka płytek naraz (Heltec, CYD): każda ma własne połączenie, drony ze wszystkich są na jednej liście
+const boards = new Map();      // id urządzenia Bluetooth -> {device, rx, buffer, failures, want, status, tags, ...}
+let drones = new Map();        // klucz -> {..dane z płytki, seen: ms, first: ms}
+let tags = {};                 // UAS ID -> own | foreign (suma oznaczeń z płytek)
+let names = store.get("rid-names", {});  // UAS ID -> nazwa (tylko na tym telefonie)
+let pinned = new Set(store.get("rid-pinned", []));  // drony przypięte 📌 - zostają na liście mimo braku sygnału
+let me = null, expanded = null, wakeLock = null;
+const alerted = new Map();     // klucz -> ostatni alarm (ms)
+// sieć walizek: Heltec „odbiornik” przekazuje raporty węzłów LoRa {"n":..}; walizka 1 = ten tablet (jego GPS)
+const sites = new Map();       // nr -> {nr, at, bat, chg, c5, lr, snr, gpsLat, gpsLon, via}
+let siteManual = store.get("rid-site-pos", {});  // nr -> {lat, lon} ustawione ręcznie (pierwszeństwo przed GPS) albo {off: true} - pozycja usunięta
+const macNames = new Map();    // MAC -> UAS ID / nazwa sieci (węzeł wysyła nazwę co kilka raportów)
+const SITE_STALE_S = 30;       // węzeł raportuje co 3-10 s
+
+// ---------------------------------------------------------------- Bluetooth
+
+function checkSupport() {
+  const el = $("support");
+  if (!window.isSecureContext) {
+    el.hidden = false;
+    el.innerHTML = "Ta strona musi być otwarta przez <b>https://</b> (albo localhost), inaczej przeglądarka nie pozwoli na Bluetooth.";
+    return false;
+  }
+  if (!navigator.bluetooth) {
+    el.hidden = false;
+    el.innerHTML = /iPhone|iPad/.test(navigator.userAgent)
+      ? "Safari na iPhonie nie obsługuje Bluetooth na stronach. Zainstaluj darmową przeglądarkę <b>Bluefy</b> z App Store i otwórz w niej tę stronę."
+      : "Ta przeglądarka nie obsługuje Web Bluetooth. Na Androidzie użyj <b>Chrome</b>, na iPhonie przeglądarki <b>Bluefy</b>.";
+    return false;
+  }
+  return true;
+}
+
+const anyConnected = () => [...boards.values()].some((b) => b.rx);
+// nazwa z Bluetooth, a gdy telefon jej nie zna (iPhone / Bluefy) - z wiersza stanu płytki
+// Heltec - odbiornik sieci walizek to „Heltec-MAIN” (płytka w walizce z tabletem)
+const boardLabel = (b) => (b.status?.net === "rx" ? "Heltec-MAIN"
+  : (b.device.name || b.status?.name || (b.status?.dev === "cyd" ? "CYD" : b.status ? "Heltec" : "płytka")).replace(/^RID-/, ""));
+
+async function connect() {
+  if (!checkSupport()) return;
+  let dev;
+  try {
+    dev = await navigator.bluetooth.requestDevice({
+      // po nazwie i po usłudze: część telefonów nie odczytuje nazwy z reklamy Heltec
+      filters: [{ namePrefix: "RID-Heltec" }, { namePrefix: "RID-CYD" }, { services: [NUS] }], optionalServices: [NUS],
+    });
+  } catch { return; }  // użytkownik zamknął okno wyboru
+  unlockAudio();
+  const b = attach(dev);
+  if (!b.rx) await openGatt(b);
+}
+
+function attach(dev) {
+  let b = boards.get(dev.id);
+  if (!b) {
+    b = { device: dev, rx: null, buffer: "", failures: 0, want: true, status: null, tags: {},
+          state: "", cls: "", histKeys: new Map(), histPts: new Map(), histInfo: "" };
+    boards.set(dev.id, b);
+    dev.addEventListener("gattserverdisconnected", () => onDisconnected(b));
+  }
+  b.device = dev;
+  b.want = true;
+  b.failures = 0;
+  b.hint = "";
+  rememberBoards();
+  startGps();
+  renderBoards();
+  return b;
+}
+
+// po odświeżeniu strony łączymy się sami z tymi płytkami
+function rememberBoards() {
+  store.set("rid-auto-ids", [...boards.entries()].filter(([, b]) => b.want).map(([id]) => id));
+}
+
+async function openGatt(b) {
+  setConn(b, "łączę…", "");
+  try {
+    const server = await b.device.gatt.connect();
+    const svc = await server.getPrimaryService(NUS);
+    let tx;
+    try {
+      b.rx = await svc.getCharacteristic(NUS_RX);
+      tx = await svc.getCharacteristic(NUS_TX);
+    } catch (e) {
+      // tylko brak charakterystyki to starszy firmware; zerwane połączenie albo parowanie to zwykły błąd połączenia
+      if (e.name !== "NotFoundError") throw e;
+      b.rx = null;
+      b.want = false;
+      b.device.gatt.disconnect();
+      setConn(b, "brak obsługi telefonu", "off");
+      b.hint = "Płytka nie udostępnia części dla telefonu. Usuń ją w ustawieniach Bluetooth, sparuj ponownie, "
+        + "a jeśli to nie pomoże, sprawdź, czy ma firmware 1.5 lub nowszy.";
+      rememberBoards();
+      renderBoards();
+      return;
+    }
+    if (!tx._rid) {  // ten sam obiekt wraca przy ponownym połączeniu - jeden odbiornik danych
+      tx.addEventListener("characteristicvaluechanged", (e) => onData(b, e));
+      tx._rid = true;
+    }
+    await tx.startNotifications();
+    b.buffer = "";
+    b.failures = 0;
+    b.hint = "";
+    setConn(b, "połączono", "on");
+    // czas z telefonu (godziny w historii także bez komputera), potem drony z pamięci płytki
+    setTimeout(async () => { await send(b, `TIME ${Math.floor(Date.now() / 1000)}`); send(b, "HIST"); }, 800);
+    $("pinhint").hidden = true;
+  } catch (e) {
+    // najczęściej: anulowane okno parowania albo zły PIN - nie pytamy w kółko
+    b.rx = null;
+    b.failures++;
+    if (b.failures >= 2) {
+      b.want = false;
+      if (b.device.gatt.connected) b.device.gatt.disconnect();
+      setConn(b, "nie sparowano", "off");
+      b.hint = "Nie udało się połączyć. Sprawdź PIN na ekranie płytki (albo na stronie RID Decoder) i spróbuj ponownie. "
+        + `Jeśli telefon był wcześniej sparowany z tą płytką, usuń ją w ustawieniach Bluetooth telefonu. (${e.name}: ${e.message})`;
+      rememberBoards();
+      renderBoards();
+      return;
+    }
+    setConn(b, "błąd połączenia", "off");
+    if (b.want) setTimeout(() => b.want && !b.device.gatt.connected && openGatt(b), 3000);
+  }
+}
+
+function onDisconnected(b) {
+  b.rx = null;
+  setConn(b, b.want ? "ponowne łączenie…" : "rozłączono", "off");
+  if (b.want) setTimeout(() => b.want && openGatt(b), 2000);
+}
+
+function disconnect(b) {
+  b.want = false;
+  if (b.device.gatt.connected) b.device.gatt.disconnect();
+  for (const [id, x] of boards) if (x === b) boards.delete(id);
+  combineTags();
+  rememberBoards();
+  renderBoards();
+  render();
+}
+
+function setConn(b, text, cls) {
+  b.state = text;
+  b.cls = cls;
+  renderBoards();
+}
+
+// zapis do płytki; przy intensywnym nadawaniu płytki przeglądarka potrafi odrzucić zapis ("operacja w toku") -
+// wtedy próbujemy jeszcze dwa razy; ostatni błąd zostaje w b.lastErr do komunikatu
+async function send(b, cmd) {
+  if (!b.rx) return false;
+  const data = new TextEncoder().encode(cmd + "\n");
+  for (let i = 0; i < 3; i++) {
+    try {
+      if (b.rx.writeValueWithResponse) await b.rx.writeValueWithResponse(data);
+      else await b.rx.writeValue(data);
+      b.lastErr = "";
+      return true;
+    } catch (e) {
+      b.lastErr = `${e.name}: ${e.message}`;
+      await new Promise((r) => setTimeout(r, 300));
+    }
+  }
+  return false;
+}
+
+// polecenie do wszystkich połączonych płytek; true, gdy przyjęła je choć jedna
+async function sendAll(cmd) {
+  const res = await Promise.all([...boards.values()].filter((b) => b.rx).map((b) => send(b, cmd)));
+  return res.some(Boolean);
+}
+
+function combineTags() {
+  tags = Object.assign({}, ...[...boards.values()].map((b) => b.tags));
+}
+
+function onData(b, e) {
+  b.buffer += new TextDecoder().decode(e.target.value);
+  let i;
+  while ((i = b.buffer.indexOf("\n")) >= 0) {
+    const line = b.buffer.slice(0, i).trim();
+    b.buffer = b.buffer.slice(i + 1);
+    if (!line) continue;
+    let msg;
+    try { msg = JSON.parse(line); } catch { continue; }
+    if (msg.d) onDrone(msg.d, b);
+    else if (msg.n) onNode(msg.n, b);
+    else if (msg.s) { b.status = msg.s; renderBoards(); }
+    else if (msg.cs) {  // zajętość pasma: z CYD (walizka 1) albo z walizki przez LoRa (nr)
+      const site = msg.cs.nr || 1;
+      if (!bandsBy.has(site)) bandsBy.set(site, {});
+      bandsBy.get(site)[msg.cs.b] = { ...msg.cs, at: Date.now(), from: site === 1 ? boardLabel(b) : `W${site}`, board: b };
+      renderBand();
+    }
+    else if (msg.tags) { b.tags = msg.tags; combineTags(); render(); }
+    else if (msg.h) onHist(b, msg.h);
+    else if (msg.hp) onHistPoints(b, msg.hp);
+    else if (msg.hend !== undefined) onHistEnd(b, msg.hend);
+    else if (msg.hclr) { for (const [k, d] of drones) if (d.hist && !d.live) drones.delete(k); b.histInfo = "historia wyczyszczona"; render(); renderBoards(); }
+  }
+  if (b.buffer.length > 4000) b.buffer = "";  // zabezpieczenie przed zgubionym końcem linii
+}
+
+// ---------------------------------------------------------------- dane
+
+function keyOf(d) { return d.id || `mac:${d.mac}`; }
+function tagOf(d) { return (d.id && tags[d.id]) || d.tag || null; }
+
+// ---- historia z pamięci Heltec: te same drony, które strona RID Decoder pokazuje po imporcie
+// (osobno dla każdej płytki: b.histKeys - hk -> klucz drona, b.histPts - klucz drona -> [[t, lat, lon]])
+
+function onHist(b, h) {
+  const k = h.id.startsWith("mac:") ? `mac:${h.id.slice(4)}` : h.id;
+  b.histKeys.set(h.hk, k);
+  const e = drones.get(k) || { first: Infinity, seen: 0 };
+  const last = h.last ? h.last * 1000 : 0;
+  e.hist = true;
+  e.histFirst = h.first ? h.first * 1000 : null;
+  e.histLast = last || null;
+  e.frames = h.n;
+  e.maxh = h.maxh;
+  if (h.id && !h.id.startsWith("mac:")) e.id = h.id;
+  if (h.tag) e.tag = h.tag;
+  if (!e.live || last > e.seen) {  // dane z pamięci tylko gdy nowsze niż to, co widać na żywo
+    for (const f of ["lat", "lon", "olat", "olon", "rssi"]) if (h[f] !== undefined) e[f] = h[f];
+    if (!e.live) e.seen = last;
+  }
+  if (e.histFirst && e.histFirst < e.first) e.first = e.histFirst;
+  e.track = e.track || [];
+  drones.set(k, e);
+  b.histPts.set(k, []);
+  scheduleRender();
+}
+
+function onHistPoints(b, pts) {
+  for (const [hk, t, lat, lon] of pts) {
+    const k = b.histKeys.get(hk);
+    if (k && b.histPts.has(k)) b.histPts.get(k).push([t, lat, lon]);
+  }
+}
+
+function onHistEnd(b, n) {
+  for (const [k, pts] of b.histPts) {
+    const e = drones.get(k);
+    if (!e) continue;
+    pts.sort((a, b) => a[0] - b[0]);
+    // ślad z pamięci + to, co przyszło na żywo w trakcie
+    e.track = pts.map((p) => [p[1], p[2]]).concat(e.liveTrack || []);
+  }
+  b.histPts.clear();
+  b.histInfo = n ? `w pamięci: ${n} dronów` : b.status?.dev === "cyd" ? "" : "historia w pamięci pusta";
+  render();
+  renderBoards();
+}
+
+const timeText = (ms) => {
+  if (!ms) return "czas nieznany";
+  const d = new Date(ms), today = new Date().toDateString() === d.toDateString();
+  return today ? d.toLocaleTimeString("pl-PL", { hour: "2-digit", minute: "2-digit" })
+    : d.toLocaleString("pl-PL", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
+};
+const agoText = (d, age) => {
+  if (!d.seen) return "czas nieznany";
+  if (age < 2) return "teraz";
+  if (age < 120) return `${Math.round(age)} s temu`;
+  if (age < 3600) return `${Math.round(age / 60)} min temu`;
+  return `ostatnio ${timeText(d.seen)}`;
+};
+
+// site - numer walizki (1 = płytki połączone z tym tabletem), via - nazwa w polu „widzi”
+function onDrone(d, b, site = 1, via = boardLabel(b)) {
+  const k = keyOf(d);
+  const now = Date.now();
+  const prev = drones.get(k);
+  // dron bez ID mógł już być na liście pod adresem MAC - przenosimy go pod ID
+  if (d.id && drones.has(`mac:${d.mac}`)) {
+    const old = drones.get(`mac:${d.mac}`);
+    drones.delete(`mac:${d.mac}`);
+    RidLok.rename(`mac:${d.mac}`, k);
+    if (!prev) drones.set(k, { ...old });
+    if (alerted.has(`mac:${d.mac}`)) alerted.set(k, alerted.get(`mac:${d.mac}`));
+  }
+  const seen = now - (d.age || 0) * 1000;
+  const before = drones.get(k);
+  const merged = { ...(before || { first: seen }), ...d, seen };
+  merged.live = true;
+  merged.via = { ...(before?.via || {}), [via]: seen };  // które płytki / walizki widzą drona
+  // siła sygnału walizki 1 do położenia z sygnału: z CYD (czujniki C5 z antenami); Heltec tylko bez CYD i dla dronów Wi-Fi
+  if (site === 1 && (d.age || 0) < 3) {
+    const cydOn = [...boards.values()].some((x) => x.rx && x.status?.dev === "cyd");
+    if (b.status?.dev === "cyd" || (!cydOn && d.ch)) RidLok.note(k, 1, d.rssi, d.ch);
+  }
+  if (!Number.isFinite(merged.first)) merged.first = seen;
+  // ślad lotu do mapy: z pamięci Heltec (historia) + pozycje na żywo (ostatnie 300)
+  merged.track = before?.track || [];
+  merged.liveTrack = before?.liveTrack || [];
+  if (d.lat !== undefined) {
+    const last = merged.track[merged.track.length - 1];
+    if (!last || last[0] !== d.lat || last[1] !== d.lon) {
+      merged.track.push([d.lat, d.lon]);
+      merged.liveTrack.push([d.lat, d.lon]);
+    }
+    if (merged.track.length > 600) merged.track.shift();
+    if (merged.liveTrack.length > 300) merged.liveTrack.shift();
+  }
+  drones.set(k, merged);
+  // alarm: pierwszy raz albo po powrocie po dłuższej nieobecności; swoje nigdy
+  const returning = before && seen - before.seen > REALERT_S * 1000;
+  const waitForId = !d.id && now - merged.first < 8000;  // chwila na Basic ID, żeby nie alarmować dwa razy
+  if (tagOf(merged) !== "own" && !waitForId && (!alerted.has(k) || returning)) {
+    alerted.set(k, now);
+    raiseAlert(merged);
+  }
+  scheduleRender();
+}
+
+// raport węzła (walizki 2..9) przez Heltec „odbiornik”
+function onNode(n, b) {
+  const nr = n.nr, now = Date.now(), label = `W${nr}`;
+  const s = sites.get(nr) || { nr };
+  Object.assign(s, { at: now, bat: n.bat, chg: n.chg, c5: n.c5, lr: n.lr, snr: n.snr, via: boardLabel(b), gpsLat: n.lat, gpsLon: n.lon, sim: !!n.sim,
+    cv: n.cv, pv: n.pv });
+  sites.set(nr, s);
+  for (const e of n.e || []) {
+    if (e.nm) macNames.set(e.m, e.nm);
+    // bez nazwy w tym raporcie: z pamięci albo od drona, którego już widać pod tym samym MAC
+    const name = e.nm || macNames.get(e.m) || [...drones.values()].find((x) => x.mac === e.m && x.id)?.id || "";
+    // sieć Wi-Fi drona DJI, którą CYD dołączył do drona z Remote ID (pole ap) - sygnał trafia do tego drona
+    if (e.k === 1 && name) {
+      const host = [...drones.entries()].find(([, x]) => x.ap === name);
+      if (host) {
+        host[1].via = { ...(host[1].via || {}), [label]: now };
+        RidLok.note(host[0], nr, e.r, e.ch);
+        continue;
+      }
+    }
+    const d = { id: name, mac: e.m };
+    if (e.ch) d.ch = e.ch;
+    if (e.k === 1 && !drones.get(name || `mac:${e.m}`)?.wifi) d.wifi = "dron Wi-Fi";
+    if (e.lat !== undefined) { d.lat = e.lat; d.lon = e.lon; if (e.h !== undefined) d.h = e.h; }
+    onDrone(d, b, nr, label);
+    RidLok.note(keyOf(d), nr, e.r, e.ch);
+  }
+  renderBoards();
+  scheduleRender();
+}
+
+// pozycja walizki: 1 = tablet; węzeł - ręcznie z mapy, a bez tego GPS z raportu
+function sitePos(nr) {
+  if (nr === 1) return me ? { lat: me.lat, lon: me.lon, src: "tablet" } : null;
+  const m = siteManual[nr];
+  if (m?.off) return null;  // pozycja usunięta - także GPS walizki jest pomijany
+  if (m) return { lat: m.lat, lon: m.lon, src: "ręcznie" };
+  const s = sites.get(nr);
+  return s && s.gpsLat !== undefined ? { lat: s.gpsLat, lon: s.gpsLon, src: "GPS" } : null;
+}
+function sitePositions() {
+  const out = {};
+  for (const nr of [1, ...sites.keys()]) { const p = sitePos(nr); if (p) out[nr] = p; }
+  return out;
+}
+
+let renderTimer = null;
+function scheduleRender() {
+  if (renderTimer) return;
+  renderTimer = setTimeout(() => { renderTimer = null; render(); }, 300);
+}
+
+// ---------------------------------------------------------------- alarmy
+
+let audio = null;
+function unlockAudio() {
+  try { audio = audio || new (window.AudioContext || window.webkitAudioContext)(); audio.resume(); } catch { /* brak */ }
+}
+function beep() {
+  if (!audio) return;
+  [0, 0.2, 0.4].forEach((t) => {
+    const o = audio.createOscillator(), g = audio.createGain();
+    o.frequency.value = 880; g.gain.value = 0.2;
+    o.connect(g).connect(audio.destination);
+    o.start(audio.currentTime + t); o.stop(audio.currentTime + t + 0.12);
+  });
+}
+function raiseAlert(d) {
+  const tag = tagOf(d);
+  if ($("sound").checked) {
+    beep();
+    if (navigator.vibrate) navigator.vibrate([300, 120, 300, 120, 300]);
+  }
+  const el = document.createElement("div");
+  el.className = "alert";
+  el.innerHTML = `<span>⚠ ${tag === "foreign" ? "OBCY" : "Nowy"} dron: ${esc(names[d.id] || d.id || "bez ID")}</span><button>OK</button>`;
+  el.querySelector("button").onclick = () => el.remove();
+  $("alerts").prepend(el);
+  while ($("alerts").children.length > 3) $("alerts").lastElementChild.remove();
+  setTimeout(() => el.remove(), 60000);
+}
+
+// wysokość terenu z GUGiK dotarła - odświeżamy AGL na stronie
+RidAgl.onChange(() => scheduleRender());
+
+// ---------------------------------------------------------------- GPS telefonu
+
+// ręczna pozycja (komputer bez GPS): prawy klik albo przytrzymanie na mapie; zapamiętana w przeglądarce,
+// ma pierwszeństwo przed GPS do czasu skasowania kliknięciem znacznika GPS
+let manualMe = store.get("manualMe", null);
+function applyManualMe() {
+  if (!manualMe) return;
+  me = { lat: manualMe.lat, lon: manualMe.lon, acc: 0 };
+  $("gps").textContent = "GPS: ręcznie";
+  $("gps").title = "Pozycja ustawiona ręcznie na mapie - kliknij, żeby wrócić do GPS";
+  $("gps").classList.remove("gpsbad");
+  document.querySelector(".pickclear")?.removeAttribute("hidden");
+}
+applyManualMe();
+// kasowanie ręcznej pozycji: przycisk ✖ na mapie albo kliknięcie znacznika GPS (wtedy z pytaniem)
+function clearManualMe(ask) {
+  if (!manualMe || (ask && !confirm("Usunąć ręcznie ustawioną pozycję i wrócić do GPS?"))) return;
+  manualMe = null;
+  store.set("manualMe", null);
+  me = null;
+  $("gps").textContent = "GPS: —";
+  $("gps").title = "";
+  $("gps").classList.add("gpsbad");
+  startGps();
+  document.querySelector(".pickclear")?.setAttribute("hidden", "");
+  render();
+}
+$("gps").addEventListener("click", () => clearManualMe(true));
+
+function startGps() {
+  if (!navigator.geolocation || startGps.on) return;
+  startGps.on = true;
+  navigator.geolocation.watchPosition((p) => {
+    if (manualMe) return;
+    me = { lat: p.coords.latitude, lon: p.coords.longitude, acc: p.coords.accuracy };
+    $("gps").textContent = `GPS: ±${Math.round(me.acc)} m`;
+    $("gps").classList.remove("gpsbad");
+    scheduleRender();
+  }, () => { if (!manualMe) { $("gps").textContent = "GPS: brak dostępu"; $("gps").classList.add("gpsbad"); } },
+  { enableHighAccuracy: true, maximumAge: 5000 });
+}
+
+function geo(lat1, lon1, lat2, lon2) {
+  const r = Math.PI / 180, R = 6371000;
+  const dLat = (lat2 - lat1) * r, dLon = (lon2 - lon1) * r;
+  const a = Math.sin(dLat / 2) ** 2 + Math.cos(lat1 * r) * Math.cos(lat2 * r) * Math.sin(dLon / 2) ** 2;
+  const dist = 2 * R * Math.asin(Math.sqrt(a));
+  const y = Math.sin(dLon) * Math.cos(lat2 * r);
+  const x = Math.cos(lat1 * r) * Math.sin(lat2 * r) - Math.sin(lat1 * r) * Math.cos(lat2 * r) * Math.cos(dLon);
+  return { dist, brg: (Math.atan2(y, x) / r + 360) % 360 };
+}
+const CARD = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"];
+const cardinal = (b) => CARD[Math.round(b / 45) % 8];
+const distText = (m) => (m < 1000 ? `${Math.round(m)} m` : `${(m / 1000).toFixed(m < 10000 ? 2 : 1)} km`);
+
+// ---------------------------------------------------------------- widok
+
+// ustawienia LoRa sieci: tryby jak w firmware (net.h NET_MODES)
+const LORA_MODES = ["szybki - raport co 1 s", "zasięgowy - SF10, raport co 4 s"];
+const LORA_PWR = [10, 14, 17, 20, 22];
+const mainCfg = () => [...boards.values()].find((x) => x.rx && x.status?.net === "rx")?.status?.ncfg || null;
+function loraCfgHtml(id, c) {
+  const v = c.st && c.pend ? c.pend : c;
+  const desc = (x) => `tryb ${LORA_MODES[x.mode]?.split(" -")[0] || x.mode}, ${x.pwr} dBm, sieć ${x.id}`;
+  let st = "";
+  if (c.st) {
+    const w = (a) => (a || []).map((n) => `W${n}`).join(", ") || "—";
+    st = `<span class="lst">Zmiana na: ${desc(c.pend)} · ${c.st === 2 ? `przełączenie za ${c.sw ?? 0} s` : "zbieram potwierdzenia"}
+      · potwierdziły: <b>${w(c.ack)}</b> · czekam: <b>${w(c.wait)}</b>
+      ${c.st === 1 ? `<button data-lforce="${esc(id)}" title="Przełącz bez czekania na resztę walizek (te, które nie potwierdziły, przełączą się same, gdy przestaną słyszeć MAIN)">przełącz teraz</button>` : ""}
+      <button data-lcancel="${esc(id)}">anuluj</button></span>`;
+  }
+  return `<div class="lcfg" data-lcfg="${esc(id)}"><span>LoRa sieci walizek: <b>${desc(c)}</b> (wersja ${c.ver})</span>
+    <select data-lmode title="Tryb radia">${LORA_MODES.map((t, i) => `<option value="${i}" ${i === v.mode ? "selected" : ""}>${t}</option>`).join("")}</select>
+    <select data-lpwr title="Moc nadawania walizek">${LORA_PWR.map((p) => `<option value="${p}" ${p === v.pwr ? "selected" : ""}>${p} dBm</option>`).join("")}</select>
+    <span>sieć <input data-lid type="number" min="0" max="255" value="${v.id}" title="Numer sieci 0-255: walizki z innym numerem są pomijane"></span>
+    <button data-lapply="${esc(id)}" ${c.st ? "disabled" : ""}>Zastosuj dla wszystkich walizek</button>${st}</div>`;
+}
+
+const NET_ROLES = [["solo", "samodzielna (alarmy Meshtastic)"], ["rx", "odbiornik sieci walizek"],
+  ...[2, 3, 4, 5, 6, 7, 8, 9].map((n) => [`node ${n}`, `walizka ${n} (węzeł)`])];
+// dotknięcie nagłówka (pigułki, przyciski panelu): bez przerysowania do końca kliknięcia - inaczej przycisk pod palcem
+// znika (raporty walizek przychodzą co sekundę) i tablet gubi kliknięcie
+let headerHold = 0;
+document.querySelector("header").addEventListener("pointerdown", () => { headerHold = Date.now(); }, true);
+document.querySelector("header").addEventListener("click", () => { headerHold = 0; }, true);
+function renderBoards() {
+  // wpisywanie / wybór w panelu (rola, ustawienia LoRa) - bez przerysowania
+  const ae = document.activeElement;
+  if (ae && /^(SELECT|INPUT)$/.test(ae.tagName) && ae.closest("#devpanel")) return;
+  if (Date.now() - headerHold < 700) {
+    clearTimeout(renderBoards.later);
+    renderBoards.later = setTimeout(renderBoards, 750);
+    return;
+  }
+  const list = [...boards.values()];
+  $("connect").disabled = list.length > 0;
+  $("connect").hidden = list.length > 0;  // po połączeniu zbędny - miejsce na stan płytek i walizek
+  $("disconnectall").disabled = $("addboard").disabled = !list.length;
+  $("boardhints").innerHTML = list.filter((b) => b.hint).map((b) => `<div class="note bad" style="margin:6px 0 0">${esc(boardLabel(b))}: ${esc(b.hint)}</div>`).join("");
+  const open = !$("devpanel").hidden;
+  // pigułki: najważniejszy stan od razu widoczny (problemy na czerwono), pełne szczegóły w panelu
+  const bad = (t) => `<small class="bad">${t}</small>`, sm = (t) => `<small>${t}</small>`;
+  const batPill = (pct, chg) => chg ? sm("🔋⚡") : pct >= 0 ? (pct < 20 ? bad(`🔋 ${pct}%`) : sm(`🔋 ${pct}%`)) : "";
+  // C5 nr 1 = Wi-Fi 2,4 GHz, nr 2 = 5 GHz - każde pasmo osobno, niedziałające na czerwono
+  const c5Pill = (c5) => Array.isArray(c5) ? ["2,4 GHz", "5 GHz"].map((b, i) => (c5[i] ? sm(`<i class="on"></i>${b}`) : bad(`<i class="off"></i>${b}`))).join("") : "";
+  const pills = list.map((b) => {
+    const s = b.status, id = [...boards.entries()].find(([, x]) => x === b)[0];
+    const head = !b.rx ? (b.want ? sm("łączę…") : bad("rozłączona"))
+      : sm(s?.net === "node" ? `węzeł W${s.nr}` : s?.net === "rx" ? "odbiornik" : s?.dev === "cyd" ? "centrala" : "połączona");
+    // 2. wiersz: zasilanie i zapis, 3. wiersz: czujniki (C5, GPS) i błędy
+    const row2 = !b.rx ? [sm(esc(b.state || ""))] : [
+      s ? (s.chg === 2 ? sm("🔋 pełna") : s.chg === 1 && s.bmv <= 4300 ? sm("🔋 ładowanie") : s.bat >= 0 ? batPill(s.bat, 0) : sm("🔌 USB")) : "",
+      s?.dev === "cyd" ? (s.sd === false ? bad("SD ✗") : sm("SD ✓")) : s?.mem != null ? sm(`zapis ${s.mem}`) : "",
+    ];
+    const row3 = !b.rx ? [] : [
+      c5Pill(s?.c5),
+      s?.gps ? (s.gps.ok ? sm("GPS ✓") : bad("GPS ✗")) : "",
+      s?.neterr ? bad("LoRa ✗") : s?.net === "rx" ? sm(`LoRa: ${sites.size} walizk${sites.size === 1 ? "a" : sites.size >= 2 && sites.size <= 4 ? "i" : ""}`) : "",
+      s?.nsim ? '<small class="sim">symulacja walizek</small>' : "",
+    ];
+    return `<button class="dev${open ? " open" : ""}" data-dev="${esc(id)}" title="${esc((b.device.name || b.status?.name || boardLabel(b)).replace(/^RID-/, ""))}: ${esc(b.state || "")} - kliknij po szczegóły">
+      <span class="l1"><i class="${b.rx ? "on" : b.want ? "wait" : "off"}"></i><b>${esc(boardLabel(b))}</b>${head}</span>
+      <span class="l2">${row2.join("") || sm("&nbsp;")}</span><span class="l2">${row3.join("") || sm("&nbsp;")}</span></button>`;
+  }).concat([...sites.values()].sort((a, b) => a.nr - b.nr).map((s) => {
+    const age = (Date.now() - s.at) / 1000, fresh = age < SITE_STALE_S, p = sitePos(s.nr);
+    const head = fresh ? sm(age < 5 ? "teraz" : `${Math.round(age)} s temu`) : bad(`cisza ${ago(age)}`);
+    const mc = mainCfg();
+    const cfgPill = !mc || s.cv === undefined ? "" : mc.st ? (s.pv === mc.pend?.ver || s.cv === mc.pend?.ver ? sm("⚙✓") : bad("⚙ czeka"))
+      : s.cv !== mc.ver ? bad("⚙ inne") : "";  // ⚙ = ustawienia LoRa (zmiana z Heltec-MAIN)
+    const row2 = [s.lr < -110 ? bad(`LoRa ${s.lr} dBm`) : sm(`LoRa ${s.lr} dBm`), batPill(s.bat, s.chg), cfgPill];
+    const row3 = [c5Pill(s.c5), p ? sm(p.src === "ręcznie" ? "📍 ręcznie" : "📍 GPS") : bad(siteManual[s.nr]?.off ? "📍 usunięta" : "📍 brak")];
+    return `<button class="dev${open ? " open" : ""}" data-dev="site${s.nr}" title="Walizka ${s.nr} przez LoRa (sygnał w dBm) - kliknij po szczegóły">
+      <span class="l1"><i class="${fresh ? "on" : "off"}"></i><b>Walizka ${s.nr}</b>${s.sim ? '<small class="sim" title="Walizka z symulacji w Heltec - nie jest prawdziwa">SYM</small>' : ""}${head}</span>
+      <span class="l2">${row2.join("")}</span><span class="l2">${row3.join("")}</span></button>`;
+  }));
+  $("boards").innerHTML = pills.length ? pills.join("") : '<span class="pill off">nie połączono</span>';
+  if (!pills.length) $("devpanel").hidden = true;
+  $("devpanel").innerHTML = `<div class="dphead"><span>Płytki połączone z tym urządzeniem i walizki przez LoRa</span><button data-dpclose="1">Zamknij ✕</button></div>` + list.map((b) => {
+    const s = b.status;
+    const id = [...boards.entries()].find(([, x]) => x === b)[0];
+    let info = "";
+    if (s && b.rx) {
+      const bat = s.chg === 2 ? `<b style="color:var(--ok)">pełna ⚡</b>` : s.chg === 1 && s.bmv <= 4300 ? "<b>ładowanie ⚡</b>"
+        : s.bat >= 0 ? `<b style="color:${s.bat <= 15 ? "var(--bad)" : s.bat <= 35 ? "var(--warn)" : "var(--ok)"}">${s.bat}%</b>` : "<b>USB</b>";
+      const cyd = s.dev === "cyd";
+      info = `<span>zasilanie ${bat}</span>
+        <span>${cyd ? `SD <b>${s.sd ? s.mem : "brak"}</b>` : `zapisane <b>${s.mem}</b>`}</span>
+        ${s.ch != null ? `<span>kanał <b>${s.ch}${s.fixed ? "" : "*"}</b></span>` : ""}
+        ${Array.isArray(s.c5) ? s.c5.map((on, i) => `<span>${i ? "5 GHz" : "2,4 GHz"} (C5 nr ${i + 1}) <b style="color:var(--${on ? "ok" : "bad"})">${on ? "działa" : "brak"}</b></span>`).join("") : ""}
+        ${cyd || (s.net && s.net !== "solo") ? "" : `<span>LoRa <b>${s.mesh ? "nadaje" : "wył."}</b></span>`}
+        ${s.gps ? `<span>GPS <b style="color:var(--${s.gps.ok ? "ok" : "bad"})">${s.gps.ok ? (s.gps.fixed ? "stała pozycja" : `${s.gps.sat} sat.`) : s.gps.nmea ? "szuka" : "brak modułu"}</b></span>` : ""}
+        ${s.neterr ? `<span style="color:var(--bad)">LoRa: ${esc(s.neterr)}</span>` : ""}
+        ${s.net ? `<button data-netsim="${esc(id)}" title="Walizki 2-4 i dwa drony udawane przez tę płytkę (bez komputera, zostaje po wyłączeniu zasilania) - do pokazu i testu strony">${s.nsim ? "■ wyłącz symulację" : "▶ symulacja walizek"}</button>` : ""}
+        ${s.net ? `<span>rola <select data-netb="${esc(id)}">${NET_ROLES.map(([v, t]) => `<option value="${v}" ${v === (s.net === "node" ? `node ${s.nr}` : s.net) ? "selected" : ""}>${t}</option>`).join("")}</select></span>` : ""}
+        ${s.pc ? "<span><b>PC</b></span>" : ""}
+        ${s.net === "node" && s.ncfg ? `<span>LoRa: wersja ustawień <b>${s.ncfg.ver}</b> (tryb ${s.ncfg.mode}, ${s.ncfg.pwr} dBm, sieć ${s.ncfg.id})</span>` : ""}
+        ${s.pend ? `<span>oznaczeń do przeniesienia <b>${s.pend}</b></span>` : ""}
+        ${b.histInfo ? `<span>${esc(b.histInfo)}</span>` : ""}`;
+    }
+    return `<div class="board"><span class="bn">${esc(boardLabel(b))}</span>
+      <span class="pill ${b.cls}">${esc(b.state || "—")}</span>${info}
+      ${s?.net === "rx" && s.ncfg && b.rx ? loraCfgHtml(id, s.ncfg) : ""}
+      <span class="acts"><button data-board="${esc(id)}" data-bact="${b.want ? "off" : "on"}" title="${b.want ? "Rozłącz tę płytkę" : "Połącz tę płytkę"}">${b.want ? "Rozłącz" : "Połącz"}</button></span></div>`;
+  }).join("") + [...sites.values()].sort((a, b) => a.nr - b.nr).map((s) => {
+    const age = (Date.now() - s.at) / 1000, p = sitePos(s.nr);
+    const bat = s.chg ? "ładowanie ⚡" : s.bat >= 0 ? `${s.bat}%` : "—";
+    return `<div class="board site" title="Raporty przez LoRa (odbiera ${esc(s.via)})"><span class="bn">Walizka ${s.nr}</span>
+      <span class="pill ${age < SITE_STALE_S ? "on" : "off"}">${age < SITE_STALE_S ? "LoRa" : "cisza"} ${ago(age)} temu</span>
+      <span>sygnał <b>${s.lr} dBm</b> SNR ${s.snr}</span><span>zasilanie <b>${bat}</b></span>
+      ${(s.c5 || []).map((on, i) => `<span>${i ? "5 GHz" : "2,4 GHz"} (C5 nr ${i + 1}) <b style="color:var(--${on ? "ok" : "bad"})">${on ? "działa" : "brak"}</b></span>`).join("")}
+      <span>pozycja <b style="color:var(--${p ? "ok" : "bad"})">${p ? p.src : siteManual[s.nr]?.off ? "usunięta" : "brak - ustaw 📍"}</b></span>
+      <span class="acts">
+        <button data-site="${s.nr}" title="Ustaw pozycję walizki: kliknij, a potem jej miejsce na mapie (znacznik można też przeciągnąć)">📍 ustaw</button>
+        ${p ? `<button data-siteoff="${s.nr}" title="Walizka bez pozycji: nie liczy się do położenia dronów i znika z mapy (GPS walizki też jest pomijany, dopóki nie wybierzesz ↺ GPS albo 📍)">usuń pozycję</button>` : ""}
+        ${siteManual[s.nr] && s.gpsLat !== undefined ? `<button data-siteclr="${s.nr}" title="Wróć do pozycji z GPS walizki">↺ GPS</button>` : ""}
+        <button data-siteforget="${s.nr}" title="Usuń walizkę z widoku (z ręczną pozycją). Wróci sama, gdy znowu przyśle raport.">✕</button>
+      </span></div>`;
+  }).join("");
+}
+
+// pigułka w nagłówku: panel szczegółów; klik poza nagłówkiem zamyka panel
+$("boards").addEventListener("click", (e) => {
+  if (!e.target.closest("[data-dev]")) return;
+  $("devpanel").hidden = !$("devpanel").hidden;
+  renderBoards();
+});
+document.addEventListener("click", (e) => {
+  // ścieżka z chwili kliknięcia: kliknięty przycisk mógł już zniknąć przy przerysowaniu nagłówka
+  const inHeader = e.composedPath().includes(document.querySelector("header"));
+  if (!$("devpanel").hidden && !inHeader) { $("devpanel").hidden = true; renderBoards(); }
+});
+function forgetSite(nr) {
+  sites.delete(nr);
+  delete siteManual[nr];
+  store.set("rid-site-pos", siteManual);
+  renderBoards();
+  render();
+}
+$("devpanel").addEventListener("change", async (e) => {
+  const sel = e.target.closest("[data-netb]");
+  const b = sel && boards.get(sel.dataset.netb);
+  if (!b) return;
+  sel.blur();
+  if (!confirm(`Zmienić rolę płytki ${boardLabel(b)} na: ${sel.selectedOptions[0].text}?\nPłytka uruchomi się ponownie, a strona połączy się z nią sama.`)) { renderBoards(); return; }
+  if (!(await send(b, `NET ${sel.value}`))) alert("Płytka nie przyjęła polecenia - sprawdź połączenie.");
+});
+$("devpanel").addEventListener("click", (e) => {
+  if (e.target.closest("[data-dpclose]")) { $("devpanel").hidden = true; renderBoards(); return; }
+  const site = e.target.closest("[data-site]");
+  if (site) { $("devpanel").hidden = true; renderBoards(); startPick(Number(site.dataset.site)); return; }
+  // ustawienia LoRa sieci (Heltec-MAIN rozsyła je do walizek)
+  const lap = e.target.closest("[data-lapply]");
+  if (lap) {
+    const b = boards.get(lap.dataset.lapply), box = lap.closest(".lcfg");
+    if (!b || !box) return;
+    const id = Math.max(0, Math.min(255, parseInt(box.querySelector("[data-lid]").value, 10) || 0));
+    const mode = box.querySelector("[data-lmode]").value, pwr = box.querySelector("[data-lpwr]").value;
+    if (!confirm(`Zmienić ustawienia LoRa wszystkich walizek na: tryb ${LORA_MODES[mode]}, ${pwr} dBm, sieć ${id}?\n\n`
+      + "Heltec-MAIN roześle je do walizek, a gdy potwierdzą - wszyscy przełączą się razem (ok. 10 s). "
+      + "Walizka wyłączona w tym czasie zostanie na starych ustawieniach (trzeba ją ustawić ręcznie).")) return;
+    send(b, `NETCFG id=${id};mode=${mode};pwr=${pwr}`).then((ok) => { if (!ok) alert("Płytka nie przyjęła polecenia - sprawdź połączenie."); });
+    return;
+  }
+  const lf = e.target.closest("[data-lforce],[data-lcancel]");
+  if (lf) {
+    const b = boards.get(lf.dataset.lforce || lf.dataset.lcancel);
+    if (b) send(b, lf.dataset.lforce ? "NETCFG force" : "NETCFG cancel");
+    return;
+  }
+  const simb = e.target.closest("[data-netsim]");
+  if (simb) {
+    const b = boards.get(simb.dataset.netsim);
+    if (!b) return;
+    const off = !!b.status?.nsim;
+    // włączenie: symulowane walizki wokół pozycji tabletu
+    send(b, off ? "NETSIM off" : me ? `NETSIM ${me.lat.toFixed(6)} ${me.lon.toFixed(6)}` : "NETSIM on").then((ok) => {
+      if (!ok) { alert("Płytka nie przyjęła polecenia - sprawdź połączenie."); return; }
+      b.status.nsim = !off;
+      if (off) {  // wyłączenie: symulowane walizki i drony znikają od razu
+        for (const [nr, st] of sites) if (st.sim) forgetSite(nr);
+        for (const [k, d] of drones) if (/^SIM-|-SIM$/.test(d.id || "")) drones.delete(k);
+      }
+      renderBoards();
+      render();
+    });
+    return;
+  }
+  const clr = e.target.closest("[data-siteclr]");
+  if (clr) { clearSite(Number(clr.dataset.siteclr)); return; }
+  const off = e.target.closest("[data-siteoff]");
+  if (off) { removeSitePos(Number(off.dataset.siteoff)); return; }
+  const fg = e.target.closest("[data-siteforget]");
+  if (fg) {
+    const nr = Number(fg.dataset.siteforget);
+    if (confirm(`Usunąć walizkę ${nr} z widoku? Wróci sama, gdy znowu przyśle raport przez LoRa.`)) forgetSite(nr);
+    return;
+  }
+  const btn = e.target.closest("[data-board]");
+  if (!btn) return;
+  const b = boards.get(btn.dataset.board);
+  if (!b) return;
+  if (btn.dataset.bact === "off") disconnect(b);
+  else { attach(b.device); openGatt(b); }
+});
+
+const UA_TYPES = ["", "samolot", "wielowirnikowiec", "wiatrakowiec", "VTOL", "ornitopter", "szybowiec", "latawiec",
+  "balon wolny", "balon na uwięzi", "sterowiec", "spadochron", "rakieta", "na uwięzi", "przeszkoda", "inny"];
+const EU_CATS = ["", "otwarta", "szczególna", "certyfikowana"];
+const OP_LOC = ["miejsce startu", "na żywo", "stała"];
+// model po początku numeru seryjnego: tylko kody potwierdzone na prawdziwych dronach
+const DRONE_MODELS = { "1581F6W8": "DJI Avata 2", "1581F5FJ": "DJI Mavic 3T" };
+function droneModel(id) {
+  if (!id) return null;
+  const m = Object.keys(DRONE_MODELS).find((p) => id.startsWith(p));
+  return m ? DRONE_MODELS[m] : id.startsWith("1581") ? "DJI, model nieznany" : null;
+}
+const HEIGHT_LIMIT_M = 120;
+const LOST_WINDOW_S = 300;
+
+function tagBadge(t) {
+  return t === "own" ? '<span class="tag own">SWÓJ</span>' : t === "foreign" ? '<span class="tag foreign">OBCY</span>' : '<span class="tag none">nieoznaczony</span>';
+}
+
+function render() {
+  const now = Date.now();
+  const hideOwn = $("hideown").checked;
+  // nieaktywne dłużej niż wybrany czas znikają (jak na CYD); zostają przypięte i historia pobrana z płytki
+  const ttl = Number($("ttl").value);
+  if (ttl) for (const [k, d] of drones) if (!pinned.has(k) && !d.hist && (now - d.seen) / 1000 > ttl) drones.delete(k);
+  // u góry aktywne od najbliższego (bez pozycji: od najsilniejszego sygnału), niżej nieaktywne od najświeższego
+  // położenie z siły sygnału (sieć walizek): drony z Remote ID kalibrują model, pozostałe dostają obszar
+  const sp = sitePositions();
+  const list = [...drones.entries()]
+    .map(([k, d]) => {
+      const age = (now - d.seen) / 1000;
+      if (d.lat !== undefined && age < 5 && sites.size) RidLok.calibrate(k, d.lat, d.lon, d.h, sp);
+      const est = d.lat === undefined && sites.size && age <= STALE_S ? RidLok.estimate(k, sp, d.h) : null;
+      const at = d.lat !== undefined ? d : est && !est.ring ? est : null;
+      return { k, d, tag: tagOf(d), age, est, dist: me && at ? geo(me.lat, me.lon, at.lat, at.lon).dist : Infinity };
+    })
+    .filter((x) => !(hideOwn && x.tag === "own"))
+    .sort((a, b) => (a.age > STALE_S) - (b.age > STALE_S)
+      || (a.age > STALE_S ? a.age - b.age : a.dist - b.dist || (b.d.rssi ?? -999) - (a.d.rssi ?? -999)));
+
+  if (!list.length) {
+    $("list").innerHTML = `<div class="empty">${anyConnected() ? "Brak dronów w zasięgu. Płytki nasłuchują…" : "Połącz się z płytką Heltec albo CYD, żeby zobaczyć drony w zasięgu."}</div>`;
+  } else {
+    $("list").innerHTML = list.map(({ k, d, tag, age, est }) => {
+      const pos = d.lat !== undefined && me ? geo(me.lat, me.lon, d.lat, d.lon) : null;
+      const op = d.olat !== undefined && me ? geo(me.lat, me.lon, d.olat, d.olon) : null;
+      const opDrone = d.olat !== undefined && d.lat !== undefined ? geo(d.olat, d.olon, d.lat, d.lon).dist : null;
+      const name = names[d.id];
+      let h = `<div class="card ${tag || ""} ${age > STALE_S ? "stale" : ""} ${expanded === k ? "sel" : ""}" data-k="${esc(k)}">
+        <div class="top"><div><div class="uid">${pinned.has(k) ? '<span title="przypięty - zostaje na liście">📌</span> ' : ""}${esc(name || d.id || "bez ID (" + d.mac + ")")}</div>
+          ${name ? `<div style="color:var(--muted);font-size:12px">${esc(d.id)}</div>` : ""}</div>${tagBadge(tag)}</div>`;
+      const model = droneModel(d.id);
+      const cls = d.cl >= 1 && d.cl <= 7 ? `C${d.cl - 1}` : null;
+      if (model || cls || UA_TYPES[d.ut]) h += `<div style="margin-top:4px;color:var(--muted);font-size:13px">${[model, cls, UA_TYPES[d.ut]].filter(Boolean).map(esc).join(" · ")}</div>`;
+      if (d.sid) h += `<div style="margin-top:4px;font-size:13px">opis: <b>${esc(d.sid)}</b></div>`;
+      if (d.h > HEIGHT_LIMIT_M && age <= STALE_S) h += `<div style="margin-top:4px;color:var(--bad);font-weight:700">⚠ ponad ${HEIGHT_LIMIT_M} m: ${Math.round(d.h)} m</div>`;
+      if (age > STALE_S && age < LOST_WINDOW_S && d.st === 2) h += `<div style="margin-top:4px;color:var(--bad);font-weight:700">⚠ zanik sygnału w locie ${Math.round(age)} s temu</div>`;
+      if (pos) h += `<div style="margin-top:6px"><span class="dist">${distText(pos.dist)}</span>
+        <span class="arrow" style="transform:rotate(${pos.brg}deg)">↑</span> ${cardinal(pos.brg)} ${Math.round(pos.brg)}°</div>`;
+      if (d.wifi) h += `<div style="margin-top:6px"><b>dron Wi-Fi: ${esc(d.wifi)}</b> · kanał ${d.ch ?? "—"} · bez Remote ID (brak pozycji)</div>`;
+      if (est) {
+        const ep = me && !est.ring ? geo(me.lat, me.lon, est.lat, est.lon) : null;
+        h += `<div class="est">📡 ${est.ring ? `${est.dist < 30 ? `<b>bardzo blisko</b> walizki ${est.levels[0].site} (poniżej ~30 m)` : `ok. <b>${distText(est.dist)}</b> od walizki ${est.levels[0].site}`} - kierunku nie da się ustalić z jednej walizki`
+          : `położenie orientacyjne: <b>${ep ? `${distText(ep.dist)} ${cardinal(ep.brg)}` : "na mapie"}</b> ±${distText(est.err)} · z ${est.sites} walizek`}</div>`;
+      }
+      if (sites.size) {
+        const lv = RidLok.levels(k);
+        if (lv.length) h += `<div style="margin-top:4px;font-size:13px;color:var(--muted)">sygnał: ${lv.map((o) => `W${o.site} <b style="color:var(--text)">${o.r}</b>${o.band === "2G4" ? "" : ` (${o.band === "5G" ? "5 GHz" : "BLE"})`}`).join(" · ")} dBm</div>`;
+      }
+      if (d.ap) h += `<div style="margin-top:6px">sieć Wi-Fi drona: <b>${esc(d.ap)}</b> · kanał ${d.ach ?? "—"}</div>`;
+      h += `<div class="nums">
+        <span>wys. <b>${fmt(d.h ?? d.alt, " m")}</b></span>
+        ${d.lat !== undefined && RidAgl.agl(d.lat, d.lon, d.alt, d.id || d.mac) != null ? `<span>AGL <b>${fmt(RidAgl.agl(d.lat, d.lon, d.alt, d.id || d.mac), " m")}</b></span>` : ""}
+        <span>prędk. <b>${fmt(d.spd, " m/s", 1)}</b></span>
+        ${d.vs !== undefined ? `<span>pion <b>${fmt(d.vs, " m/s", 1)}</b></span>` : ""}
+        ${d.baro !== undefined ? `<span>baro <b>${fmt(d.baro, " m")}</b></span>` : ""}
+        ${d.mh !== undefined ? `<span>maks. wys. lotu <b>${fmt(d.mh, " m")}</b></span>` : ""}
+        ${d.ms !== undefined ? `<span>maks. prędk. <b>${fmt(d.ms, " m/s", 1)}</b></span>` : ""}
+        <span>kurs <b>${fmt(d.trk, "°")}</b></span>
+        <span>RSSI <b>${fmt(d.rssi, " dBm")}</b></span>
+        <span>operator <b>${op ? `${distText(op.dist)} ${cardinal(op.brg)}` : opDrone !== null ? `${distText(opDrone)} od drona` : "—"}</b></span>
+        ${d.opid ? `<span>nr operatora <b>${esc(d.opid)}</b></span>` : ""}
+        ${d.olt !== undefined && OP_LOC[d.olt] ? `<span>poz. operatora <b>${OP_LOC[d.olt]}</b></span>` : ""}
+        ${d.oalt !== undefined ? `<span>wys. operatora <b>${fmt(d.oalt, " m")}</b></span>` : ""}
+        ${EU_CATS[d.cat] ? `<span>kategoria UE <b>${EU_CATS[d.cat]}</b></span>` : ""}
+        <span>${agoText(d, age)}</span>
+        ${d.hist ? `<span>z pamięci: <b>${timeText(d.histFirst)} – ${timeText(d.histLast)}</b></span>` : ""}
+        ${d.maxh ? `<span>maks. wys. <b>${fmt(d.maxh, " m")}</b></span>` : ""}
+        ${d.lat === undefined && !d.wifi && !est ? "<span>brak pozycji drona</span>" : ""}
+        ${boards.size > 1 && d.via ? `<span>widzi: <b>${esc(Object.keys(d.via).filter((n) => Date.now() - d.via[n] < STALE_S * 1000).join(", ") || "—")}</b></span>` : ""}
+      </div>`;
+      if (expanded === k) {
+        h += `<div class="more">
+          <input id="nameinp" maxlength="40" placeholder="nazwa na tym telefonie, np. Mavic 3T OSP" value="${esc(name || "")}" ${d.id ? "" : "disabled"}>
+          <div class="row">
+            <button class="own ${tag === "own" ? "active" : ""}" data-act="own" ${d.id ? "" : "disabled"}>${tag === "own" ? "✓ " : ""}Swój</button>
+            <button class="foreign ${tag === "foreign" ? "active" : ""}" data-act="foreign" ${d.id ? "" : "disabled"}>${tag === "foreign" ? "✓ " : ""}Obcy</button>
+            ${tag ? `<button data-act="-">Usuń oznaczenie</button>` : ""}
+          </div>
+          <div class="row">
+            <button data-pin="1">${pinned.has(k) ? "📌 Odepnij - usuwaj po czasie" : "📌 Zostaw na liście"}</button>
+          </div>
+          <div class="row">
+            ${d.lat !== undefined ? `<a href="https://www.google.com/maps/search/?api=1&query=${d.lat},${d.lon}" target="_blank" rel="noopener">dron w Mapach</a>` : ""}
+            ${d.olat !== undefined ? `<a href="https://www.google.com/maps/search/?api=1&query=${d.olat},${d.olon}" target="_blank" rel="noopener">operator w Mapach</a>` : ""}
+          </div>
+          ${d.id ? "" : '<div style="color:var(--muted);font-size:12px">Dron bez UAS ID - nie da się go oznaczyć na stałe.</div>'}
+        </div>`;
+      }
+      return h + "</div>";
+    }).join("");
+  }
+  const ci = RidLok.calInfo();
+  const offs = Object.entries(ci.off);
+  const simOn = [...sites.values()].some((x) => x.sim);
+  $("lokinfo").innerHTML = (simOn ? '<span class="sim">⚠ SYMULACJA walizek z Heltec - walizki SYM i drony SIM nie są prawdziwe.</span><br>' : "")
+    + (sites.size || ci.cnt ? `📡 Położenie z siły sygnału jest orientacyjne (walizka 1 = ten tablet, założona wysokość drona
+    ${RidLok.H_DEF} m). Kalibracja z dronów z Remote ID: <b>${ci.cnt}</b> pomiarów${ci.cnt ? ` - moc z 1 m: 2,4 GHz ${ci.A["2G4"].v}, 5 GHz ${ci.A["5G"].v} dBm${offs.length ? `, poprawki walizek ${offs.map(([s, v]) => `W${s} ${v > 0 ? "+" : ""}${v}`).join(" ")} dB` : ""}` : ""}.
+    ${ci.cnt ? '<button id="calreset">zeruj kalibrację</button>' : ""}` : "");
+  renderViews(list);
+}
+
+// ---------------------------------------------------------------- mapa (Leaflet + OpenStreetMap) / radar
+
+let map = null, mapLoading = null, mapFailed = false, autoFit = true;
+let picking = false, pickSite = null;  // 📍: czekamy na kliknięcie mapy - moja pozycja albo walizki pickSite
+const estLayers = new Map();  // klucz drona -> {img, mark} - obszar położenia z sygnału
+const siteLayers = new Map(); // numer walizki -> znacznik
+const bandsBy = new Map();    // walizka (1 = płytki tego tabletu) -> pasmo (2G4, 5G) -> {c, r, p, at, from, board}
+const mapLayers = new Map();  // klucz drona -> {drone, op, link, track}
+let meMarker = null, meCircle = null;
+const TAG_COLOR = { own: "#3ccf7a", foreign: "#ff4d4f" };
+
+function loadLeaflet() {
+  if (window.L) return Promise.resolve();
+  if (mapLoading) return mapLoading;
+  mapLoading = new Promise((resolve, reject) => {
+    const css = document.createElement("link");
+    css.rel = "stylesheet";
+    css.href = "https://unpkg.com/leaflet@1.9.4/dist/leaflet.css";
+    document.head.appendChild(css);
+    const js = document.createElement("script");
+    js.src = "https://unpkg.com/leaflet@1.9.4/dist/leaflet.js";
+    js.onload = resolve;
+    js.onerror = reject;
+    document.head.appendChild(js);
+  });
+  return mapLoading;
+}
+
+async function ensureMap() {
+  if (map || mapFailed) return map;
+  try { await loadLeaflet(); } catch {
+    mapFailed = true;  // brak internetu i biblioteki w pamięci telefonu
+    mapLoading = null;
+    return null;
+  }
+  if (map) return map;  // równoległe wywołanie (kilka odświeżeń w trakcie ładowania Leaflet) już ją utworzyło
+  map = L.map("map", { zoomControl: true, attributionControl: true }).setView([52.1, 19.4], 6);
+  map.attributionControl.setPosition("bottomleft");
+  // ikona 📍: klik ikony, potem klik na mapie = moja pozycja (komputer bez GPS); prawy klik / przytrzymanie też działa
+  const PickControl = L.Control.extend({
+    options: { position: "topleft" },
+    onAdd() {
+      const box = L.DomUtil.create("div", "leaflet-bar pickbox");
+      const b = L.DomUtil.create("button", "pickme", box);
+      b.type = "button";
+      b.textContent = "📍";
+      b.title = "Ustaw swoją pozycję: kliknij tę ikonę, a potem swoje miejsce na mapie";
+      b.onclick = () => {
+        picking = !picking;
+        pickSite = null;
+        b.classList.toggle("on", picking);
+        map.getContainer().classList.toggle("picking", picking);
+      };
+      const x = L.DomUtil.create("button", "pickme pickclear", box);  // widoczny tylko przy ręcznej pozycji
+      x.type = "button";
+      x.textContent = "✖";
+      x.title = "Usuń ręcznie ustawioną pozycję";
+      x.hidden = !manualMe;
+      x.onclick = () => clearManualMe(false);
+      L.DomEvent.disableClickPropagation(box);
+      return box;
+    },
+  });
+  new PickControl().addTo(map);
+  const setMeAt = (ll) => {
+    manualMe = { lat: ll.lat, lon: ll.lng };
+    store.set("manualMe", manualMe);
+    applyManualMe();
+    map.closePopup();
+    render();
+  };
+  map.on("click", (e) => {
+    if (!picking) return;
+    picking = false;
+    document.querySelector(".pickme")?.classList.remove("on");
+    map.getContainer().classList.remove("picking");
+    if (pickSite) { setSiteAt(pickSite, e.latlng); $("mapmsg").hidden = true; }
+    else setMeAt(e.latlng);
+    pickSite = null;
+  });
+  map.on("contextmenu", (e) => {
+    L.popup().setLatLng(e.latlng).setContent('<button id="setme">Ustaw tu moją pozycję</button>').openOn(map);
+    $("setme").onclick = () => setMeAt(e.latlng);
+  });
+  // podkłady mapy; wybór zapamiętany w telefonie
+  const bases = {
+    "OpenStreetMap": L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 19, attribution: "© OpenStreetMap" }),
+    "Google Hybrid": L.tileLayer("https://mt{s}.google.com/vt/lyrs=y&x={x}&y={y}&z={z}",
+      { maxZoom: 21, subdomains: "0123", attribution: "© Google" }),
+  };
+  (bases[store.get("rid-base", "OpenStreetMap")] || bases.OpenStreetMap).addTo(map);
+  L.control.layers(bases, null, { position: "topright" }).addTo(map);
+  map.on("baselayerchange", (e) => store.set("rid-base", e.name));
+  map.on("dragstart", () => { autoFit = false; });  // użytkownik przesuwa mapę - nie przeskakujemy
+  return map;
+}
+
+function setSiteAt(nr, ll) {
+  siteManual[nr] = { lat: ll.lat, lon: ll.lng };
+  store.set("rid-site-pos", siteManual);
+  renderBoards();
+  render();
+}
+// walizka bez pozycji (także bez GPS) do czasu 📍 albo ↺ GPS
+function removeSitePos(nr) {
+  siteManual[nr] = { off: true };
+  store.set("rid-site-pos", siteManual);
+  map?.closePopup();
+  renderBoards();
+  render();
+}
+function clearSite(nr) {
+  delete siteManual[nr];
+  store.set("rid-site-pos", siteManual);
+  map?.closePopup();
+  renderBoards();
+  render();
+}
+async function startPick(nr) {
+  const m = await ensureMap();
+  if (!m) { alert("Mapa niedostępna - pozycję walizki da GPS węzła albo polecenie GPS <lat> <lon> wysłane do jej Heltec."); return; }
+  picking = true;
+  pickSite = nr;
+  m.getContainer().classList.add("picking");
+  $("mapmsg").hidden = false;
+  $("mapmsg").textContent = `Kliknij na mapie miejsce walizki ${nr}.`;
+}
+
+// walizki na mapie: przeciągnięcie = ręczna pozycja, dotknięcie / prawy klik = menu (usuń pozycję, powrót do GPS)
+function renderSites(pts) {
+  const sp = sitePositions(), seen = new Set();
+  for (const [nrs, p] of Object.entries(sp)) {
+    const nr = Number(nrs);
+    if (nr === 1) continue;  // walizka 1 = znacznik tabletu
+    seen.add(nr);
+    const s = sites.get(nr), off = !s || (Date.now() - s.at) / 1000 > SITE_STALE_S;
+    const icon = L.divIcon({ className: "", iconSize: [26, 22], iconAnchor: [13, 11], html: `<div class="sicon${off ? " off" : ""}">W${nr}</div>` });
+    let m = siteLayers.get(nr);
+    if (!m) {
+      m = L.marker([p.lat, p.lon], { draggable: true, zIndexOffset: 500, icon }).addTo(map);
+      m.on("dragstart", () => { m._dragging = true; });
+      m.on("dragend", () => { m._dragging = false; setSiteAt(nr, m.getLatLng()); });
+      // menu walizki: dotknięcie znacznika (przytrzymanie na tablecie przejmuje przeciąganie) albo prawy klik
+      const menu = () => {
+        const gps = sites.get(nr)?.gpsLat !== undefined;
+        L.popup().setLatLng(m.getLatLng()).setContent(`<div style="display:flex;flex-direction:column;gap:6px"><b>Walizka ${nr}</b>
+          <button id="siteoff">Usuń pozycję</button>${siteManual[nr] && gps ? '<button id="siteclr">Wróć do pozycji z GPS</button>' : ""}
+          <small>Przeciągnij znacznik, żeby przesunąć walizkę.</small></div>`).openOn(map);
+        $("siteoff").onclick = () => removeSitePos(nr);
+        if ($("siteclr")) $("siteclr").onclick = () => clearSite(nr);
+      };
+      m.on("click", menu);
+      m.on("contextmenu", menu);
+      m.bindTooltip("");
+      m._off = null;
+      siteLayers.set(nr, m);
+    }
+    if (m._dragging) continue;
+    m.setLatLng([p.lat, p.lon]);
+    if (m._off !== off) { m.setIcon(icon); m._off = off; }  // nowa ikona tylko przy zmianie (przerywałaby przeciąganie)
+    m.setTooltipContent(`Walizka ${nr} · pozycja: ${p.src}${off ? " · brak raportów" : ""}<br>dotknij - menu (usuń pozycję), przeciągnij - przesuń`);
+    pts.push([p.lat, p.lon]);
+  }
+  for (const [nr, m] of siteLayers) if (!seen.has(nr)) { m.remove(); siteLayers.delete(nr); }
+}
+
+// obszar położenia z siły sygnału: plama prawdopodobieństwa + środek (przy jednej walizce sam pierścień)
+function renderEstimates(list, pts) {
+  const seen = new Set();
+  for (const { k, d, est } of list) {
+    if (!est) continue;
+    seen.add(k);
+    let g = estLayers.get(k);
+    if (!g) {
+      g = { img: L.imageOverlay(est.img, est.bounds, { interactive: false, zIndex: 250 }).addTo(map) };
+      estLayers.set(k, g);
+    } else {
+      g.img.setUrl(est.img);
+      g.img.setBounds(L.latLngBounds(est.bounds));
+    }
+    if (est.ring) {
+      if (g.mark) { g.mark.remove(); g.mark = null; }
+      continue;
+    }
+    if (!g.mark) {
+      g.mark = L.circleMarker([est.lat, est.lon], { radius: 7, color: "#ff8c00", weight: 2, dashArray: "3 3", fillColor: "#ff8c00", fillOpacity: 0.25 })
+        .addTo(map).on("click", () => focusCard(k));
+      g.mark.bindTooltip("", { permanent: true, direction: "right", offset: [8, 0], className: "lbl" });
+    }
+    g.mark.setLatLng([est.lat, est.lon]).setTooltipContent(`~ ${esc(mapLabel(d))} ±${distText(est.err)}`);
+    pts.push([est.lat, est.lon]);
+  }
+  for (const [k, g] of estLayers) {
+    if (seen.has(k)) continue;
+    g.img.remove();
+    g.mark?.remove();
+    estLayers.delete(k);
+  }
+}
+
+function droneIcon(d, tag) {
+  const c = TAG_COLOR[tag] || "#f0b429";
+  const shape = d.trk !== undefined
+    ? `<path d="M15 2 L26 27 L15 21 L4 27 Z" fill="${c}" stroke="#000" stroke-width="1.6"/>`
+    : `<circle cx="15" cy="15" r="9" fill="${c}" stroke="#000" stroke-width="1.6"/>`;
+  return L.divIcon({ className: "dicon", iconSize: [30, 30], iconAnchor: [15, 15],
+    html: `<svg viewBox="0 0 30 30" style="transform:rotate(${d.trk || 0}deg)">${shape}</svg>` });
+}
+
+// wybór na liście <-> na mapie: niebieski pierścień wokół drona (albo środka obszaru położenia) i obramowana karta
+let selRing = null, panToSel = false;
+function renderSel(list) {
+  const x = expanded && list.find((i) => i.k === expanded);
+  const pos = !x ? null : x.d.lat !== undefined ? [x.d.lat, x.d.lon] : x.est && !x.est.ring ? [x.est.lat, x.est.lon] : null;
+  if (!pos) { selRing?.remove(); selRing = null; panToSel = false; return; }
+  if (!selRing) selRing = L.circleMarker(pos, { radius: 21, color: "#3fb6ff", weight: 3, fill: false, interactive: false }).addTo(map);
+  selRing.setLatLng(pos).bringToFront();
+  if (panToSel) {  // tylko po wyborze na liście; potem mapa nie ucieka za dronem
+    panToSel = false;
+    autoFit = false;
+    if (!map.getBounds().pad(-0.15).contains(pos)) map.panTo(pos);
+  }
+}
+
+function focusCard(k) {
+  expanded = k;
+  render();
+  document.querySelector(`.card[data-k="${CSS.escape(k)}"]`)?.scrollIntoView({ behavior: "smooth", block: "center" });
+}
+
+// podpis drona na mapie: własna nazwa albo pełny UAS ID / nazwa sieci (UAS ID ma do 20 znaków); dłuższe ucięte na końcu
+const mapLabel = (d) => { const t = names[d.id] || d.id || d.mac || "?"; return t.length > 24 ? `${t.slice(0, 23)}…` : t; };
+
+function renderMap(list) {
+  const seen = new Set(), pts = [];
+  for (const { k, d, tag, age } of list) {
+    if (d.lat === undefined) continue;
+    seen.add(k);
+    let g = mapLayers.get(k);
+    if (!g) {
+      g = { track: L.polyline([], { weight: 2, opacity: 0.6 }).addTo(map) };
+      g.drone = L.marker([d.lat, d.lon], { zIndexOffset: 1000 }).addTo(map).on("click", () => focusCard(k));
+      g.drone.bindTooltip("", { permanent: true, direction: "right", offset: [14, 0], className: "lbl" });
+      mapLayers.set(k, g);
+    }
+    const color = TAG_COLOR[tag] || "#f0b429";
+    g.track.setLatLngs(d.track || []).setStyle({ color });
+    g.drone.setLatLng([d.lat, d.lon]).setIcon(droneIcon(d, tag)).setOpacity(age > STALE_S ? 0.5 : 1);
+    g.drone.setTooltipContent(`${esc(mapLabel(d))}<br>↑${fmt(d.h ?? d.alt, " m")}${RidAgl.agl(d.lat, d.lon, d.alt, d.id || d.mac) != null ? ` · AGL ${fmt(RidAgl.agl(d.lat, d.lon, d.alt, d.id || d.mac), " m")}` : ""}${me ? ` · ↔${distText(geo(me.lat, me.lon, d.lat, d.lon).dist)}` : ""}${d.olat !== undefined ? `<br>🎮 ${distText(geo(d.lat, d.lon, d.olat, d.olon).dist)}` : ""}`);
+    pts.push([d.lat, d.lon]);
+    if (d.olat !== undefined) {
+      if (!g.op) {
+        g.op = L.marker([d.olat, d.olon], { icon: L.divIcon({ className: "", iconSize: [14, 14], html: '<div class="oicon"></div>' }) })
+          .addTo(map).bindTooltip("operator").on("click", () => focusCard(k));
+        g.link = L.polyline([], { color: "#c77dff", weight: 1.5, dashArray: "5 5" }).addTo(map);
+      }
+      g.op.setLatLng([d.olat, d.olon]);
+      g.link.setLatLngs([[d.olat, d.olon], [d.lat, d.lon]]);
+      pts.push([d.olat, d.olon]);
+    }
+  }
+  for (const [k, g] of mapLayers) {
+    if (seen.has(k)) continue;
+    Object.values(g).forEach((x) => x && x.remove());
+    mapLayers.delete(k);
+  }
+  renderSites(pts);
+  renderEstimates(list, pts);
+  renderSel(list);
+  if (me) {
+    if (!meMarker) {
+      meCircle = L.circle([me.lat, me.lon], { radius: me.acc, color: "#3fb6ff", weight: 1, fillOpacity: 0.08 }).addTo(map);
+      meMarker = L.circleMarker([me.lat, me.lon], { radius: 7, color: "#fff", weight: 2, fillColor: "#3fb6ff", fillOpacity: 1 })
+        .addTo(map).bindTooltip("Ty");
+    }
+    meMarker.setLatLng([me.lat, me.lon]).setTooltipContent(sites.size ? "Ty (walizka 1)" : "Ty");
+    meCircle.setLatLng([me.lat, me.lon]).setRadius(me.acc);
+    pts.push([me.lat, me.lon]);
+  } else if (meMarker) {  // pozycja skasowana
+    meMarker.remove();
+    meCircle.remove();
+    meMarker = meCircle = null;
+  }
+  if (autoFit && pts.length) {
+    const b = L.latLngBounds(pts);
+    if (!map.getBounds().contains(b) || map.getZoom() < 10) map.fitBounds(b.pad(0.2), { maxZoom: 17, animate: false });
+  }
+}
+
+async function renderViews(list) {
+  renderRadar(list);
+  renderBand();
+  const m = await ensureMap();
+  if (!m) {
+    $("mapmsg").hidden = false;
+    $("mapmsg").textContent = "Mapa niedostępna bez internetu (albo nieobejrzana wcześniej) - radar i lista działają.";
+    $("map").style.visibility = "hidden";
+    return;
+  }
+  $("map").style.visibility = "";
+  $("mapmsg").hidden = true;
+  m.invalidateSize();
+  renderMap(list);
+}
+
+$("fit").addEventListener("click", () => { autoFit = true; if (map) map.setZoom(5); render(); });
+
+const v3 = RidViews.view3d($("view3d"), $("v3info"));
+RidViews.fitRadar($("rbox"), $("radarwrap"));
+function renderRadar(list) {
+  const pts = [];
+  if (me) {
+    list.forEach(({ d, tag, age }, n) => {  // n łączy operatora z jego dronem w widoku 3D
+      const fresh = age <= STALE_S;
+      if (d.lat !== undefined) pts.push({ ...geo(me.lat, me.lon, d.lat, d.lon), kind: "d", tag, fresh, label: (names[d.id] || d.id || "?").slice(-6), h: d.h ?? null, n, agl: RidAgl.agl(d.lat, d.lon, d.alt, d.id || d.mac),
+        op: d.olat !== undefined ? geo(d.lat, d.lon, d.olat, d.olon).dist : null });
+      if (d.olat !== undefined) pts.push({ ...geo(me.lat, me.lon, d.olat, d.olon), kind: "o", fresh, n });
+    });
+  }
+  const noPos = list.filter(({ d }) => d.lat === undefined).length;
+  const scale = RidViews.pickScale(pts);
+  const outside = pts.filter((p) => p.kind === "d" && p.dist > scale).length;
+  // bez GPS radar jest pusty bez napisu - brak pozycji pokazuje migający znacznik GPS w nagłówku
+  const msg = !me ? "" : [noPos && `${RidViews.dronesText(noPos)} bez pozycji`, outside && `${RidViews.dronesText(outside)} poza skalą`].filter(Boolean).join(", ");
+  $("radarscale").textContent = me ? `zasięg ${RidViews.distText(scale)}` : "";
+  $("radarmsg").textContent = msg;
+  RidViews.radar($("radar"), $("sweep"), pts, scale);
+  v3.set(pts.filter((p) => p.dist <= scale), scale, "");
+  RidViews.share("rid-view-phone", { pts, scale, msg, hasMe: !!me, me });
+}
+// radar i widok 3D w nowej karcie, na cały ekran (dane przez BroadcastChannel, ta karta musi zostać otwarta)
+document.querySelectorAll(".popout").forEach((b) => b.addEventListener("click", () => window.open(`view.html?m=${b.dataset.view}`, "_blank")));
+
+// zajętość kanałów: ile ramek Wi-Fi słychać, a nie widmo radiowe, więc np. ELRS i analogowego wideo tu nie widać
+const BAND_FRESH_S = 30;      // C5 podaje pasmo co ok. 10 s
+const ago = (s) => s < 120 ? `${Math.round(s)} s` : s < 7200 ? `${Math.round(s / 60)} min` : `${Math.round(s / 3600)} h`;
+// CYD w statusie podaje stan czujników C5: [nr 1, nr 2]
+function boardOff(b, nr) {
+  const st = b?.board?.status;
+  return Array.isArray(st?.c5) && st.c5[nr - 1] === false;
+}
+
+let bandsOpen = store.get("rid-bands-open", false);  // panel pasm rozwinięty (domyślnie jedna linia - więcej miejsca na mapę)
+$("bandwrap").addEventListener("click", (e) => {
+  if (!e.target.closest("[data-bandtoggle]")) return;
+  bandsOpen = !bandsOpen;
+  store.set("rid-bands-open", bandsOpen);
+  render();  // mapa zmienia wysokość
+});
+// czujnik C5 danego pasma w walizce odłączony: walizka 1 - stan z CYD, pozostałe - z raportu LoRa
+function bandOff(site, id) {
+  const i = id === "5G" ? 1 : 0;
+  if (site === 1) return boardOff(bandsBy.get(1)?.[id], i + 1);
+  return sites.get(site)?.c5?.[i] === false;
+}
+
+function renderBand() {
+  const BAND = [["2G4", "Wi-Fi 2,4 GHz"], ["5G", "Wi-Fi 5 GHz"]];
+  // W1 (CYD połączony z tym urządzeniem) zawsze widoczny - także bez danych, z przyczyną
+  const cyd = [...boards.values()].find((x) => x.rx && x.status?.dev === "cyd");
+  const siteNrs = [...new Set([...bandsBy.keys(), ...(cyd ? [1] : [])])].sort((a, b) => a - b);
+  const hasRow = (n, id) => !!bandsBy.get(n)?.[id] || (n === 1 && !!cyd);
+  // C5 pasma w CYD wyłączony / bez danych (także gdy z CYD nie przyszło jeszcze nic o pasmach)
+  const lab = (n) => (n === 1 ? "CYD" : `W${n}`);  // walizka główna (płytki tego tabletu) = CYD
+  const offW1 = (id) => Array.isArray(cyd?.status?.c5) && cyd.status.c5[id === "5G" ? 1 : 0] === false;
+  const fresh = (site, id) => { const b = bandsBy.get(site)?.[id]; return b && (Date.now() - b.at) / 1000 <= BAND_FRESH_S && !bandOff(site, id); };
+  // kanały, na których teraz słychać drona (płytka podaje kanał ostatniej ramki Wi-Fi)
+  // także kanał sieci Wi-Fi dołączonej do drona DJI (ach, np. Avata 2 na 5,8 GHz)
+  const live = [...drones.values()].filter((d) => (Date.now() - d.seen) / 1000 <= STALE_S);
+  const hit = new Set(live.flatMap((d) => [d.ch, d.ach]).filter(Boolean));
+  const bar = `<div id="bandbar" data-bandtoggle="1" title="${bandsOpen ? "Zwiń" : "Rozwiń"} panel pasm"><b>${bandsOpen ? "▾" : "▸"} Pasma Wi-Fi</b>
+    ${BAND.map(([id, title]) => {
+      const list = siteNrs.filter((n) => hasRow(n, id));
+      return `<span>${title.replace("Wi-Fi ", "")}: ${list.length ? list.map((n) => `<span class="bsite" style="color:var(--${fresh(n, id) ? "ok" : "bad"})">${lab(n)}</span>`).join("") : "<b>brak danych</b>"}</span>`;
+    }).join("")}
+    ${hit.size ? `<span class="hitch">dron na kanale ${[...hit].sort((a, b) => a - b).join(", ")}</span>` : ""}
+    <span style="margin-left:auto">${bandsOpen ? "zwiń" : "pokaż wykresy"}</span></div>`;
+  if (!bandsOpen) { $("bandwrap").innerHTML = bar; return; }
+  // mapa ciepła: wiersz na walizkę (W1 = płytki tego tabletu), kolumna na kanał
+  $("bandwrap").innerHTML = bar + BAND.map(([id, title]) => {
+    const rows = siteNrs.filter((n) => hasRow(n, id));
+    if (!rows.length) return `<div class="hm"><h4>${title}</h4><div class="bandempty">Brak danych z czujników ESP32-C5 (${id === "5G" ? "nr 2" : "nr 1"}).</div></div>`;
+    let chans = [...new Set(rows.flatMap((n) => bandsBy.get(n)?.[id]?.c || []))].sort((a, b) => a - b);
+    if (!chans.length) chans = id === "5G" ? [36, 40, 44, 48, 52, 56, 60, 64, 100, 104, 108, 112, 116, 120, 124, 128, 132, 136, 140, 149, 153, 157, 161, 165] : [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13];
+    let h = `<div class="hmgrid" style="grid-template-columns: 30px repeat(${chans.length}, minmax(0, 1fr))"><span></span>`
+      + chans.map((c) => `<span class="chn${hit.has(c) ? " hit" : ""}">${c}</span>`).join("");
+    for (const n of rows) {
+      const b = bandsBy.get(n)?.[id];
+      h += `<span class="lab" title="${esc(b?.from || (n === 1 ? boardLabel(cyd) : `walizka ${n}`))}">${lab(n)}</span>`;
+      if (!b || !fresh(n, id)) {
+        const why = (n === 1 ? offW1(id) : bandOff(n, id)) ? `czujnik C5 nr ${id === "5G" ? 2 : 1} nie działa`
+          : b ? `brak nowych danych (${ago((Date.now() - b.at) / 1000)} temu)` : "brak danych z C5 - CYD nie przysłał jeszcze zajętości kanałów";
+        h += `<span class="none" style="grid-column: span ${chans.length}">${why}</span>`;
+        continue;
+      }
+      h += chans.map((c) => {
+        const i = (b.c || []).indexOf(c);
+        if (i < 0) return '<span class="cell"></span>';
+        const rate = b.r[i], peak = b.p[i], a = rate ? Math.min(1, Math.log10(rate + 1) / 2.7) : 0;
+        return `<span class="cell${hit.has(c) ? " hit" : ""}${a > 0.6 ? " dark" : ""}" style="background:rgba(63,182,255,${a.toFixed(2)})"
+          title="${lab(n)} · kanał ${c}${hit.has(c) ? " · dron" : ""}: ${rate} ramek/s${peak > -128 ? `, ${peak} dBm` : ""}">${peak > -128 ? peak : ""}</span>`;
+      }).join("");
+    }
+    return `<div class="hm"><h4>${title}<small>jasność: ramki/s, liczba: najsilniejszy sygnał dBm</small></h4>${h}</div></div>`;
+  }).join("") + `<div id="bandnote">Zajętość kanałów Wi-Fi z czujników C5 każdej walizki (CYD - walizka główna, W2.. - walizki przez LoRa), a nie widmo: aparatur ELRS ani analogowego wideo tu nie widać. Czerwona ramka: kanał, na którym teraz słychać drona.</div>`;
+}
+
+// ---------------------------------------------------------------- obsługa
+
+$("connect").addEventListener("click", connect);
+$("addboard").addEventListener("click", connect);
+$("disconnectall").addEventListener("click", () => [...boards.values()].forEach(disconnect));
+$("hideown").addEventListener("change", render);
+$("ttl").value = String(store.get("rid-ttl", 300));
+$("ttl").addEventListener("change", () => { store.set("rid-ttl", Number($("ttl").value)); render(); });
+$("clearlist").addEventListener("click", () => {
+  drones.clear();
+  pinned.clear();  // wyczyszczona lista - przypięcia też
+  store.set("rid-pinned", []);
+  render();
+});
+$("histreload").addEventListener("click", () => sendAll("HIST"));
+$("lokinfo").addEventListener("click", (e) => {
+  if (e.target.id === "calreset" && confirm("Wyzerować kalibrację położenia z sygnału?")) { RidLok.calReset(); render(); }
+});
+$("histclear").addEventListener("click", () => {
+  if (confirm("Skasować historię dronów zapisaną w Heltec? (Pełny zapis ramek dla komputera zostaje.)")) sendAll("HISTCLR");
+});
+$("list").addEventListener("click", async (e) => {
+  const card = e.target.closest(".card");
+  if (!card) return;
+  const k = card.dataset.k, d = drones.get(k);
+  if (e.target.dataset?.pin) {  // przypięcie: dron nie znika z listy po czasie
+    if (pinned.has(k)) pinned.delete(k); else pinned.add(k);
+    store.set("rid-pinned", [...pinned]);
+    render();
+    return;
+  }
+  const act = e.target.dataset?.act;
+  if (act && d?.id) {
+    const nm = $("nameinp")?.value.trim();
+    if (nm) names[d.id] = nm; else delete names[d.id];
+    store.set("rid-names", names);
+    // od razu widać wybór; gdy Heltec nie przyjmie polecenia - wracamy do poprzedniego
+    const before = { tag: tags[d.id], dtag: d.tag };
+    if (act === "-") delete tags[d.id]; else tags[d.id] = act;
+    d.tag = act === "-" ? undefined : act;
+    render();
+    if (!(await sendAll(`TAG ${d.id} ${act}`))) {
+      if (before.tag) tags[d.id] = before.tag; else delete tags[d.id];
+      d.tag = before.dtag;
+      const errs = [...boards.values()].filter((x) => x.lastErr).map((x) => `${boardLabel(x)}: ${x.lastErr}`).join("\n");
+      alert("Nie zapisano oznaczenia - sprawdź połączenie z płytką." + (errs ? `\n\n${errs}` : ""));
+      render();
+    }
+    return;
+  }
+  if (e.target.closest(".more")) return;
+  expanded = expanded === k ? null : k;
+  if (expanded) panToSel = true;  // mapa pokazuje wybranego drona
+  render();
+});
+$("list").addEventListener("change", (e) => {
+  if (e.target.id !== "nameinp") return;
+  const d = drones.get(e.target.closest(".card").dataset.k);
+  if (!d?.id) return;
+  const nm = e.target.value.trim();
+  if (nm) names[d.id] = nm; else delete names[d.id];
+  store.set("rid-names", names);
+});
+// ---- ustawienia zapamiętane w telefonie
+const PREFS = ["sound", "wake", "hideown"];
+const prefs = store.get("rid-prefs", {});
+for (const id of PREFS) if (id in prefs) $(id).checked = prefs[id];
+for (const id of PREFS) {
+  $(id).addEventListener("change", (e) => { prefs[id] = e.target.checked; store.set("rid-prefs", prefs); });
+}
+
+// Bluefy i starsze iOS nie mają Wake Lock API - wtedy ekran trzyma zapętlone, wyciszone mini-wideo
+let keepAwakeVideo = null;
+function videoKeepAwake(on) {
+  if (!on) { keepAwakeVideo?.pause(); return Promise.resolve(true); }
+  if (!keepAwakeVideo) {
+    keepAwakeVideo = document.createElement("video");
+    keepAwakeVideo.setAttribute("playsinline", "");
+    keepAwakeVideo.setAttribute("muted", "");
+    keepAwakeVideo.muted = true;
+    keepAwakeVideo.loop = true;
+    keepAwakeVideo.src = "nosleep.mp4";
+    keepAwakeVideo.style.cssText = "position:fixed;left:0;bottom:0;width:1px;height:1px;opacity:0.01;pointer-events:none";
+    document.body.appendChild(keepAwakeVideo);
+  }
+  return keepAwakeVideo.play().then(() => true, () => false);  // bez dotknięcia strony iOS odmówi
+}
+
+async function applyWake() {
+  const on = $("wake").checked;
+  if (navigator.wakeLock) {
+    try {
+      if (on && (!wakeLock || wakeLock.released)) wakeLock = await navigator.wakeLock.request("screen");
+      if (!on) { await wakeLock?.release(); wakeLock = null; }
+      return true;
+    } catch { /* odmowa - próbujemy wideo */ }
+  }
+  return videoKeepAwake(on);
+}
+$("wake").addEventListener("change", async (e) => {
+  if (!(await applyWake()) && e.target.checked) {
+    e.target.checked = false;
+    prefs.wake = false;
+    store.set("rid-prefs", prefs);
+  }
+});
+document.addEventListener("visibilitychange", () => {
+  // przeglądarka zwalnia blokadę ekranu, gdy karta jest w tle - po powrocie bierzemy ją znowu
+  if (document.visibilityState === "visible") applyWake();
+});
+// po odświeżeniu: blokada ekranu i dźwięk; część przeglądarek wymaga do tego dotknięcia strony
+applyWake();
+document.addEventListener("pointerdown", () => { unlockAudio(); applyWake(); }, { once: true });
+document.addEventListener("touchend", () => applyWake(), { once: true });  // iOS: odtwarzanie wideo tylko po dotknięciu
+
+// ---- po odświeżeniu łączymy się sami z wcześniej wybranymi płytkami (bez okna wyboru i PIN-u)
+async function autoReconnect() {
+  let ids = store.get("rid-auto-ids", null);
+  if (ids === null) ids = store.get("rid-auto", false) ? "heltec" : [];  // zapis ze starszej wersji strony
+  if (!navigator.bluetooth?.getDevices || !window.isSecureContext) {
+    // Chrome bez dostępu do sparowanych płytek: podpowiedź tylko dla tych, którzy już się łączyli
+    if ((ids === "heltec" || ids.length) && !store.get("rid-autohint-hide", false)) {
+      const el = document.createElement("div");
+      el.className = "note";
+      el.style.cssText = "margin:6px 0 0;padding:6px 10px";
+      el.innerHTML = `Ta przeglądarka nie łączy się sama z płytkami po otwarciu strony. W Chrome wpisz w pasku adresu
+        <b>chrome://flags/#enable-web-bluetooth-new-permissions-backend</b>, ustaw <b>Enabled</b> i uruchom Chrome ponownie.
+        <button style="margin-left:8px;padding:2px 8px">✕</button>`;
+      el.querySelector("button").onclick = () => { el.remove(); store.set("rid-autohint-hide", true); };
+      $("boardhints").after(el);
+    }
+    return;
+  }
+  let known;
+  try { known = await navigator.bluetooth.getDevices(); } catch { return; }
+  known = known.filter((d) => (ids === "heltec" ? (d.name || "").startsWith("RID-Heltec") : ids.includes(d.id)));
+  for (const dev of known) {
+    const b = attach(dev);
+    setConn(b, "łączę automatycznie…", "");
+    try { await dev.gatt.connect(); } catch {
+      // płytka jeszcze nieosiągalna - czekamy na jej reklamę
+      if (dev.watchAdvertisements) {
+        dev.addEventListener("advertisementreceived", () => { if (b.want && !b.rx) openGatt(b); }, { once: true });
+        try { await dev.watchAdvertisements(); } catch { /* brak wsparcia */ }
+        continue;
+      }
+    }
+    openGatt(b);
+  }
+}
+// odświeżanie wieku danych, gdy płytka nic nie przysyła; bez przerysowania w trakcie wpisywania nazwy
+setInterval(() => { if (document.activeElement?.id !== "nameinp") render(); }, 2000);
+
+if (checkSupport()) autoReconnect();
+if ("serviceWorker" in navigator && window.isSecureContext) navigator.serviceWorker.register("sw.js").catch(() => {});
+</script>
+</body>
+</html>

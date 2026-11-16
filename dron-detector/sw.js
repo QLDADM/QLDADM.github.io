@@ -1,0 +1,63 @@
+// Strona działa bez internetu po pierwszym otwarciu (w terenie telefon łączy się tylko z Heltec).
+// Obejrzane fragmenty mapy i biblioteka Leaflet zostają w pamięci telefonu.
+// nazwa pamięci = wersja strony; nowe pliki i tak przychodzą od razu (fetch z no-cache niżej),
+// więc nazwę zmienia się tylko przy nowej wersji strony
+const CACHE = "dron-detector-1.0";
+const TILES = "rid-tiles-v1";
+const MAX_TILES = 1500;  // ok. 20-40 MB
+const FILES = ["./", "index.html", "radar.js", "agl.js", "lok.js", "view.html", "manifest.webmanifest", "favicon.png", "icon-192.png", "icon-512.png", "nosleep.mp4"];
+
+self.addEventListener("install", (e) => {
+  // cache: "reload" - prosto z serwera; GitHub Pages pozwala przeglądarce trzymać pliki 10 min (max-age=600)
+  e.waitUntil(caches.open(CACHE).then((c) => c.addAll(FILES.map((f) => new Request(f, { cache: "reload" }))))
+    .then(() => self.skipWaiting()));
+});
+
+self.addEventListener("activate", (e) => {
+  e.waitUntil(caches.keys()
+    .then((keys) => Promise.all(keys.filter((k) => k !== CACHE && k !== TILES).map((k) => caches.delete(k))))
+    .then(() => self.clients.claim()));
+});
+
+async function trimTiles(cache) {
+  const keys = await cache.keys();
+  for (let i = 0; i < keys.length - MAX_TILES; i++) await cache.delete(keys[i]);  // najstarsze pierwsze
+}
+
+// kafelki mapy i Leaflet: najpierw pamięć telefonu (rzadko się zmieniają), potem sieć
+async function cacheFirst(req, name) {
+  const cache = await caches.open(name);
+  const hit = await cache.match(req);
+  if (hit) return hit;
+  const res = await fetch(req);
+  if (res.ok || res.type === "opaque") {
+    await cache.put(req, res.clone());
+    if (name === TILES && Math.random() < 0.05) trimTiles(cache);
+  }
+  return res;
+}
+
+self.addEventListener("fetch", (e) => {
+  if (e.request.method !== "GET") return;
+  const url = new URL(e.request.url);
+  if (url.hostname === "tile.openstreetmap.org" || /^mt[0-3]\.google\.com$/.test(url.hostname)) {
+    e.respondWith(cacheFirst(e.request, TILES));
+    return;
+  }
+  if (url.hostname === "services.gugik.gov.pl") return;  // wysokość terenu: tylko z internetem, bez zapisu
+  if (url.hostname === "unpkg.com") {
+    e.respondWith(cacheFirst(e.request, CACHE));
+    return;
+  }
+  // strona: najpierw sieć z pytaniem serwera o nowszą wersję (no-cache: bez 10-minutowej kopii przeglądarki),
+  // bez sieci - kopia z pamięci telefonu
+  e.respondWith(
+    fetch(e.request, { cache: "no-cache" })
+      .then((r) => {
+        const copy = r.clone();
+        caches.open(CACHE).then((c) => c.put(e.request, copy));
+        return r;
+      })
+      .catch(() => caches.match(e.request).then((r) => r || caches.match("index.html"))),
+  );
+});
