@@ -13,6 +13,7 @@ const RidK5 = (() => {
   const BAND_NAME = { "433": "433 MHz", UHF: "410–450 MHz", "868": "868 MHz", "915": "915 MHz", "1G2": "1,2 GHz (wideo)" };
   const SCORE_MAX = 12, SCORE_MAYBE = 3;
   const FRESH_S = 10;                        // wszystkie pasma po kolei: każde co ~3 s
+  const PANO_LEARN_S = 20;                   // panorama: 4 przebiegi nauki szumu po ~4 s, pierwsza linia DP po 5.
   const android = /Android/i.test(navigator.userAgent);
   const useUsb = !!navigator.usb && (android || !navigator.serial);
   const supported = useUsb || !!navigator.serial;
@@ -227,9 +228,17 @@ const RidK5 = (() => {
     if (!sources.size && state === "off") return "";
     const rows = [...sources.entries()].map(([key, s]) => {
       const live = fresh(s.at);
+      const sinceMode = s.modeAt ? (Date.now() - s.modeAt) / 1000 : Infinity;
       let body;
-      if (!live) {
-        body = `<span class="rfnone">${key === "usb" && state !== "on" ? "radio rozłączone" : "brak nowych danych"}</span>`;
+      if (s.mode === "pano" && !(s.pano && fresh(s.pano.at)) && sinceMode < PANO_LEARN_S + 20) {
+        // po przełączeniu panorama ~20 s uczy się szumu i radio w tym czasie nic nie wysyła
+        const left = Math.max(0, Math.ceil(PANO_LEARN_S - sinceMode));
+        body = `<span class="rfnone">panorama 88–1300 MHz: nauka szumu, ${left ? `pierwszy wynik za ok. ${left} s` : "zaraz pierwszy wynik"}…</span>`;
+      } else if (!live) {
+        const quiet = s.at ? Math.round((Date.now() - s.at) / 1000) : 0;
+        body = `<span class="rfnone">${key === "usb" && state !== "on" ? "radio rozłączone"
+          : key === "usb" && quiet < 60 ? `radio nic nie wysyła od ${quiet} s (po włączeniu panoramy klawiszem 8 pierwszy wynik jest po ok. ${PANO_LEARN_S} s)`
+          : "brak nowych danych"}</span>`;
       } else if (s.mode === "pano" && s.pano) {
         const p = s.pano;
         body = `<span class="rfpano">panorama 88–1300 MHz: ${p.khz ? `najsilniejszy nowy sygnał <b>${mhz(p.khz)} MHz</b> ${p.dbm} dBm` : "brak nowych sygnałów"}</span>`;
@@ -266,7 +275,15 @@ const RidK5 = (() => {
 
   document.addEventListener("click", (e) => {
     const m = e.target.closest("[data-k5mode]");
-    if (m) send("MODE " + m.dataset.k5mode);
+    if (!m) return;
+    send("MODE " + m.dataset.k5mode);
+    const s = sources.get("usb");  // od razu widać zmianę, zanim radio przyśle pierwszy wynik
+    if (s) {
+      s.mode = m.dataset.k5mode === "PANO" ? "pano" : "bands";
+      s.modeAt = Date.now();
+      if (s.mode === "pano") s.pano = null;
+      changeCb();
+    }
   });
   setInterval(() => { if (sources.size) changeCb(); }, 2000);  // wygaszanie starych danych bez nowych linii
 
