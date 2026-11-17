@@ -5,7 +5,7 @@
 const CACHE = "dron-detector-1.0";
 const TILES = "rid-tiles-v1";
 const MAX_TILES = 1500;  // ok. 20-40 MB
-const FILES = ["./", "index.html", "radar.js", "agl.js", "lok.js", "view.html", "manifest.webmanifest", "favicon.png", "icon-192.png", "icon-512.png", "nosleep.mp4"];
+const FILES = ["./", "index.html", "radar.js", "agl.js", "lok.js", "k5.js", "view.html", "manifest.webmanifest", "favicon.png", "icon-192.png", "icon-512.png", "nosleep.mp4"];
 
 self.addEventListener("install", (e) => {
   // cache: "reload" - prosto z serwera; GitHub Pages pozwala przeglądarce trzymać pliki 10 min (max-age=600)

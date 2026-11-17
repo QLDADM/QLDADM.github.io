@@ -80,6 +80,26 @@
   #radarmsg:empty { display: none; }
   #bandwrap { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
   #bandnote { grid-column: 1 / -1; color: var(--muted); font-size: 11px; }
+  /* UV-K5 (DRON-K5): wiersz łączy RF nad pasmami Wi-Fi */
+  #rfbar { grid-column: 1 / -1; display: flex; flex-direction: column; gap: 3px; font-size: 13px; color: var(--muted); }
+  #rfbar > b { color: var(--text); }
+  .rfrow { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; }
+  .rfsrc { font-weight: 600; color: var(--text); min-width: 52px; }
+  .rfb { position: relative; display: inline-flex; align-items: baseline; gap: 4px; padding: 1px 7px 3px; border: 1px solid var(--line);
+    border-radius: 7px; background: var(--panel2); color: var(--text); font-weight: 600; overflow: hidden; }
+  .rfb small { color: var(--muted); font-weight: 400; }
+  .rfb i { position: absolute; left: 0; bottom: 0; height: 3px; background: var(--accent); }
+  .rfb.maybe { border-color: var(--warn); } .rfb.maybe i { background: var(--warn); }
+  .rfb.alarm { background: var(--bad); border-color: var(--bad); color: #fff; } .rfb.alarm small { color: #fff; } .rfb.alarm i { background: #fff; }
+  .rfb.stale { opacity: .45; }
+  .rfnone { font-style: italic; }
+  .rfpano b { color: var(--text); }
+  .rfact { margin-left: auto; display: inline-flex; gap: 4px; }
+  .rfact button { padding: 2px 8px; font-size: 12px; }
+  .rfact button.on { border-color: var(--accent); color: var(--accent); }
+  .rfmsg { font-size: 12px; } .rfmsg.bad { color: var(--bad); }
+  #k5btn.k5on { border-color: var(--ok); color: var(--ok); }
+  #k5btn.k5alarm { background: var(--bad); border-color: var(--bad); color: #fff; font-weight: 700; }
   .band { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 5px 8px; min-width: 0; }
   .band.stale { opacity: .55; }
   .band h4 { margin: 0 0 2px; font-size: 13px; display: flex; justify-content: space-between; gap: 8px; }
@@ -237,6 +257,7 @@
   <button id="connect" class="primary">Połącz</button>
   <button id="disconnectall" disabled>Rozłącz</button>
   <button id="addboard" disabled title="Dodaj płytkę">+ płytka</button>
+  <button id="k5btn" title="Połącz radio UV-K5 z DRON-K5 kablem programującym (USB)">UV-K5</button>
   <div id="devpanel" hidden></div>
 </header>
 <div id="support" class="note bad" hidden></div>
@@ -288,6 +309,7 @@
 <script src="agl.js"></script>
 <script src="radar.js"></script>
 <script src="lok.js"></script>
+<script src="k5.js"></script>
 <script>
 "use strict";
 const NUS = "6e400001-b5a3-f393-e0a9-e50e24dcca9e";
@@ -705,6 +727,23 @@ function raiseAlert(d) {
   while ($("alerts").children.length > 3) $("alerts").lastElementChild.remove();
   setTimeout(() => el.remove(), 60000);
 }
+
+// UV-K5: początek alarmu w paśmie (wzorzec przeskoków łącza ELRS / Crossfire albo wideo 1,2 GHz)
+function raiseRfAlert(src, band) {
+  if ($("sound").checked) {
+    beep();
+    if (navigator.vibrate) navigator.vibrate([300, 120, 300, 120, 300]);
+  }
+  const el = document.createElement("div");
+  el.className = "alert";
+  el.innerHTML = `<span>⚠ Łącze drona RF: ${esc(RidK5.bandName(band))} (UV-K5, ${esc(src.label)})</span><button>OK</button>`;
+  el.querySelector("button").onclick = () => el.remove();
+  $("alerts").prepend(el);
+  while ($("alerts").children.length > 3) $("alerts").lastElementChild.remove();
+  setTimeout(() => el.remove(), 60000);
+}
+RidK5.onChange(() => scheduleRender());
+RidK5.onAlarm((src, band, on) => { if (on) raiseRfAlert(src, band); });
 
 // wysokość terenu z GUGiK dotarła - odświeżamy AGL na stronie
 RidAgl.onChange(() => scheduleRender());
@@ -1473,9 +1512,10 @@ function renderBand() {
     }).join("")}
     ${hit.size ? `<span class="hitch">dron na kanale ${[...hit].sort((a, b) => a - b).join(", ")}</span>` : ""}
     <span style="margin-left:auto">${bandsOpen ? "zwiń" : "pokaż wykresy"}</span></div>`;
-  if (!bandsOpen) { $("bandwrap").innerHTML = bar; return; }
+  const rf = RidK5.html();  // łącza RF z UV-K5 (pusty, gdy radio nie było podłączone)
+  if (!bandsOpen) { $("bandwrap").innerHTML = rf + bar; return; }
   // mapa ciepła: wiersz na walizkę (W1 = płytki tego tabletu), kolumna na kanał
-  $("bandwrap").innerHTML = bar + BAND.map(([id, title]) => {
+  $("bandwrap").innerHTML = rf + bar + BAND.map(([id, title]) => {
     const rows = siteNrs.filter((n) => hasRow(n, id));
     if (!rows.length) return `<div class="hm"><h4>${title}</h4><div class="bandempty">Brak danych z czujników ESP32-C5 (${id === "5G" ? "nr 2" : "nr 1"}).</div></div>`;
     let chans = [...new Set(rows.flatMap((n) => bandsBy.get(n)?.[id]?.c || []))].sort((a, b) => a - b);
@@ -1507,6 +1547,8 @@ function renderBand() {
 
 $("connect").addEventListener("click", connect);
 $("addboard").addEventListener("click", connect);
+$("k5btn").addEventListener("click", () => { unlockAudio(); RidK5.toggle(); });
+RidK5.autoOpen();  // radio podłączone wcześniej na tym urządzeniu - bez pytania
 $("disconnectall").addEventListener("click", () => [...boards.values()].forEach(disconnect));
 $("hideown").addEventListener("change", render);
 $("ttl").value = String(store.get("rid-ttl", 300));
