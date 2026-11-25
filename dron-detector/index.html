@@ -517,6 +517,7 @@ function onData(b, e) {
     try { msg = JSON.parse(line); } catch { continue; }
     if (msg.d) onDrone(msg.d, b);
     else if (msg.n) onNode(msg.n, b);
+    else if (msg.adsl) onAdsl(msg.adsl);
     else if (msg.s) { b.status = msg.s; renderBoards(); }
     else if (msg.cs) {  // zajętość pasma: z CYD (walizka 1) albo z walizki przez LoRa (nr)
       const site = msg.cs.nr || 1;
@@ -901,7 +902,7 @@ function renderBoards() {
         ${cyd || (s.net && s.net !== "solo") ? "" : `<span>LoRa <b>${s.mesh ? "nadaje" : "wył."}</b></span>`}
         ${s.gps ? `<span>GPS <b style="color:var(--${s.gps.ok ? "ok" : "bad"})">${s.gps.ok ? (s.gps.fixed ? "stała pozycja" : `${s.gps.sat} sat.`) : s.gps.nmea ? "szuka" : "brak modułu"}</b></span>` : ""}
         ${s.neterr ? `<span style="color:var(--bad)">LoRa: ${esc(s.neterr)}</span>` : ""}
-        ${s.net ? `<button data-netsim="${esc(id)}" title="Walizki 2-4 i dwa drony udawane przez tę płytkę (bez komputera, zostaje po wyłączeniu zasilania) - do pokazu i testu strony">${s.nsim ? "■ wyłącz symulację" : "▶ symulacja walizek"}</button>` : ""}
+        ${s.net ? `<button data-netsim="${esc(id)}" title="Walizki 2-4, dwa drony i cztery statki powietrzne ADS-L udawane przez tę płytkę (bez komputera, zostaje po wyłączeniu zasilania) - do pokazu i testu strony">${s.nsim ? "■ wyłącz symulację" : "▶ symulacja walizek"}</button>` : ""}
         ${s.net ? `<span>rola <select data-netb="${esc(id)}">${NET_ROLES.map(([v, t]) => `<option value="${v}" ${v === (s.net === "node" ? `node ${s.nr}` : s.net) ? "selected" : ""}>${t}</option>`).join("")}</select></span>` : ""}
         ${s.pc ? "<span><b>PC</b></span>" : ""}
         ${s.net === "node" && s.ncfg ? `<span>LoRa: wersja ustawień <b>${s.ncfg.ver}</b> (tryb ${s.ncfg.mode}, ${s.ncfg.pwr} dBm, sieć ${s.ncfg.id})</span>` : ""}
@@ -990,6 +991,7 @@ $("devpanel").addEventListener("click", (e) => {
       if (off) {  // wyłączenie: symulowane walizki i drony znikają od razu
         for (const [nr, st] of sites) if (st.sim) forgetSite(nr);
         for (const [k, d] of drones) if (/^SIM-|-SIM$/.test(d.id || "")) drones.delete(k);
+        for (const [k, a] of aircraft) if (a.sim) aircraft.delete(k);
       }
       renderBoards();
       render();
@@ -1128,10 +1130,10 @@ function render() {
   const ci = RidLok.calInfo();
   const offs = Object.entries(ci.off);
   const simOn = [...sites.values()].some((x) => x.sim);
-  $("lokinfo").innerHTML = (simOn ? '<span class="sim">⚠ SYMULACJA walizek z Heltec - walizki SYM i drony SIM nie są prawdziwe.</span><br>' : "")
+  $("lokinfo").innerHTML = (simOn ? '<span class="sim">⚠ SYMULACJA walizek z Heltec - walizki SYM, drony SIM i statki powietrzne SIM nie są prawdziwe.</span><br>' : "")
     + (sites.size || ci.cnt ? `📡 Położenie z siły sygnału jest orientacyjne (walizka 1 = ten tablet, założona wysokość drona
     ${RidLok.H_DEF} m). Kalibracja z dronów z Remote ID: <b>${ci.cnt}</b> pomiarów${ci.cnt ? ` - moc z 1 m: 2,4 GHz ${ci.A["2G4"].v}, 5 GHz ${ci.A["5G"].v} dBm${offs.length ? `, poprawki walizek ${offs.map(([s, v]) => `W${s} ${v > 0 ? "+" : ""}${v}`).join(" ")} dB` : ""}` : ""}.
-    ${ci.cnt ? '<button id="calreset">zeruj kalibrację</button>' : ""}` : "");
+    ${ci.cnt ? '<button id="calreset">zeruj kalibrację</button>' : ""}` : "") + aircraftInfo();
   renderViews(list);
 }
 
@@ -1403,6 +1405,7 @@ function renderMap(list) {
   }
   renderSites(pts);
   renderEstimates(list, pts);
+  renderAircraft(pts);
   renderSel(list);
   if (me) {
     if (!meMarker) {
@@ -1422,6 +1425,109 @@ function renderMap(list) {
     const b = L.latLngBounds(pts);
     if (!map.getBounds().contains(b) || map.getZoom() < 10) map.fitBounds(b.pad(0.2), { maxZoom: 17, animate: false });
   }
+}
+
+// ---------------------------------------------------------------- statki powietrzne ADS-L (Heltec-MAIN, adsl.h)
+// {"adsl":{...}} z odbiornika 868 MHz albo z symulacji ("sim":1). Osobna warstwa - nie trafiają na listę dronów
+// ani do kalibracji położenia z siły sygnału. Znikają po AC_TTL_S bez wiadomości.
+const aircraft = new Map();  // AMT:adres -> ostatnia wiadomość + seen, track
+const acLayers = new Map();  // AMT:adres -> {mark, track}
+const AC_TTL_S = 30, AC_STALE_S = 8, AC_WARN_M = 2000, AC_WARN_AGL = 600;
+const AC_FIT_M = 3000;  // bliższe statki mieszczą się w „Dopasuj” (dalsze nie oddalają mapy)
+const AC_CAT = {
+  1: ["samolot", "p"], 2: ["samolot ciężki", "p"], 3: ["śmigłowiec", "h"], 4: ["szybowiec", "g"], 5: ["balon", "b"],
+  6: ["ultralight", "p"], 7: ["paralotnia", "pg"], 8: ["spadochroniarz", "pg"], 9: ["eVTOL", "h"], 10: ["wiatrakowiec", "h"],
+  11: ["dron (open)", "d"], 12: ["dron (specific)", "d"], 13: ["dron (certified)", "d"], 14: ["model", "d"],
+  15: ["śmigłowiec ciężki", "h"], 16: ["lotnia", "pg"], 17: ["paralotnia z napędem", "pg"],
+};
+const AC_EM = { 2: "ALARM", 3: "ratunkowy / medyczny", 4: "brak łączności", 5: "bezprawna ingerencja", 6: "wypadek" };
+const AC_SRC = { 0: "losowy", 5: "ICAO", 6: "FLARM", 7: "OGN", 8: "FANET" };
+const acKind = (a) => AC_CAT[a.cat] || ["statek powietrzny", "p"];
+let acDrawAt = 0;
+
+function onAdsl(a) {
+  if (a.test || a.lat === undefined) return;  // ADSL test z USB, pakiet bez pozycji
+  const k = `${a.amt}:${a.adr}`, now = Date.now();
+  const o = aircraft.get(k) || { track: [] };
+  Object.assign(o, a, { seen: now, sim: !!a.sim });
+  o.track.push([a.lat, a.lon]);
+  if (o.track.length > 180) o.track.shift();
+  aircraft.set(k, o);
+  if (map && now - acDrawAt > 500) { acDrawAt = now; renderAircraft(); }
+}
+
+function acIcon(a, stale) {
+  const kind = acKind(a)[1], c = a.em >= 2 ? "#ff4d4f" : kind === "d" ? "#f0b429" : "#4fd1ff";
+  const S = 'stroke="#000" stroke-width="1.4"';
+  const shape = {
+    p: `<path d="M15 2 L17 11 L28 16 L28 18 L17 16 L16.5 24 L20 27 L20 28.5 L15 27 L10 28.5 L10 27 L13.5 24 L13 16 L2 18 L2 16 L13 11 Z" fill="${c}" ${S}/>`,
+    g: `<path d="M15 4 L16.2 12.5 L29.5 14 L29.5 16.5 L16.2 16 L15.8 24.5 L19.5 26 L19.5 28 L10.5 28 L10.5 26 L14.2 24.5 L13.8 16 L0.5 16.5 L0.5 14 L13.8 12.5 Z" fill="${c}" stroke="#000" stroke-width="0.8"/>`,
+    h: `<ellipse cx="15" cy="14" rx="5" ry="7" fill="${c}" ${S}/><path d="M15 21 L15 29" stroke="#000" stroke-width="4"/><path d="M15 21 L15 28.5" stroke="${c}" stroke-width="2"/><path d="M3 8 L27 20 M27 8 L3 20" stroke="#000" stroke-width="2.2"/>`,
+    pg: `<path d="M3 12 Q15 1 27 12 L25 14.5 Q15 6 5 14.5 Z" fill="${c}" ${S}/><path d="M5 14.5 L15 25 L25 14.5" fill="none" stroke="#000" stroke-width="1"/><circle cx="15" cy="25" r="2.8" fill="${c}" ${S}/>`,
+    b: `<circle cx="15" cy="12" r="9" fill="${c}" ${S}/><rect x="12" y="23" width="6" height="5" fill="${c}" ${S}/>`,
+    d: `<g fill="${c}" ${S}><circle cx="7" cy="7" r="4"/><circle cx="23" cy="7" r="4"/><circle cx="7" cy="23" r="4"/><circle cx="23" cy="23" r="4"/><rect x="11" y="11" width="8" height="8"/></g>`,
+  }[kind];
+  const rot = (kind === "p" || kind === "g" || kind === "h") && a.trk !== undefined ? a.trk : 0;
+  return L.divIcon({ className: "dicon", iconSize: [30, 30], iconAnchor: [15, 15],
+    html: `<svg viewBox="0 0 30 30" style="transform:rotate(${rot}deg);opacity:${stale ? 0.45 : 1}">${shape}</svg>` });
+}
+
+function acText(a, k) {
+  const agl = RidAgl.agl(a.lat, a.lon, a.alt, k);
+  const parts = [
+    `${a.sim ? "<b>SIM</b> " : ""}${esc(acKind(a)[0])} · ${esc(AC_SRC[a.amt] || `AMT ${a.amt}`)} ${esc(a.adr)}`,
+    `↑${fmt(a.alt, " m")}${agl != null ? ` · AGL ${fmt(agl, " m")}` : ""}${a.vr ? ` · ${a.vr > 0 ? "+" : ""}${fmt(a.vr, " m/s", 1)}` : ""}`,
+    `${a.gs !== undefined ? `${fmt(a.gs * 3.6, " km/h")}` : ""}${me ? ` · ↔${distText(geo(me.lat, me.lon, a.lat, a.lon).dist)}` : ""}${a.r !== undefined && !a.sim ? ` · ${a.r} dBm` : ""}`,
+  ];
+  if (a.em >= 2) parts.push(`<b style="color:#ff4d4f">⚠ ${esc(AC_EM[a.em] || "alarm")}</b>`);
+  return parts.join("<br>");
+}
+
+function renderAircraft(pts) {
+  if (!map) return;
+  const now = Date.now();
+  for (const [k, a] of aircraft) {
+    if ((now - a.seen) / 1000 > AC_TTL_S) aircraft.delete(k);
+  }
+  for (const [k, a] of aircraft) {
+    let g = acLayers.get(k);
+    if (!g) {
+      g = { track: L.polyline([], { color: "#4fd1ff", weight: 1.5, opacity: 0.55, dashArray: "4 4", interactive: false }).addTo(map) };
+      g.mark = L.marker([a.lat, a.lon], { zIndexOffset: 900 }).addTo(map);
+      g.mark.bindTooltip("", { permanent: true, direction: "right", offset: [14, 0], className: "lbl" });
+      acLayers.set(k, g);
+    }
+    const stale = (now - a.seen) / 1000 > AC_STALE_S;
+    g.track.setLatLngs(a.track);
+    g.mark.setLatLng([a.lat, a.lon]).setIcon(acIcon(a, stale));
+    g.mark.setTooltipContent(acText(a, k));
+    if (pts && !stale && (!me || geo(me.lat, me.lon, a.lat, a.lon).dist < AC_FIT_M)) pts.push([a.lat, a.lon]);
+  }
+  for (const [k, g] of acLayers) {
+    if (aircraft.has(k)) continue;
+    g.mark.remove();
+    g.track.remove();
+    acLayers.delete(k);
+  }
+}
+
+// wiersz pod mapą: ile statków ADS-L, najbliższy i ostrzeżenie, gdy blisko i nisko (ryzyko dla lotu drona)
+function aircraftInfo() {
+  if (!aircraft.size) return "";
+  let near = null;
+  for (const [k, a] of aircraft) {
+    if (!me) break;
+    const d = geo(me.lat, me.lon, a.lat, a.lon).dist;
+    if (!near || d < near.d) near = { d, a, k };
+  }
+  const sim = [...aircraft.values()].some((a) => a.sim);
+  let s = `<br>✈ Statki powietrzne ADS-L: <b>${aircraft.size}</b>${sim ? ' <span class="sim">(w tym SIM)</span>' : ""}`;
+  if (near) {
+    const agl = RidAgl.agl(near.a.lat, near.a.lon, near.a.alt, near.k);
+    s += ` · najbliższy ${esc(acKind(near.a)[0])} ${distText(near.d)}${agl != null ? `, AGL ${fmt(agl, " m")}` : ""}`;
+    if (near.d < AC_WARN_M && (agl == null || agl < AC_WARN_AGL)) s += ' <span class="sim">⚠ blisko - uwaga na loty dronów</span>';
+  }
+  return s;
 }
 
 async function renderViews(list) {
