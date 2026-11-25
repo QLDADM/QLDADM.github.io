@@ -138,6 +138,10 @@
   .card.foreign { border-left-color: var(--bad); }
   .card.stale { opacity: .55; }
   .card.sel { box-shadow: 0 0 0 2px var(--accent); }  /* dron wybrany na liście albo na mapie */
+  .card.ac { border-left-color: #4fd1ff; }  /* statek powietrzny ADS-L */
+  .card.ac.acdrone { border-left-color: var(--warn); }
+  .card.ac.em { border-left-color: var(--bad); }
+  .sechead { margin: 16px 2px 2px; color: var(--muted); font-size: 13px; font-weight: 600; }
   .top { display: flex; justify-content: space-between; gap: 8px; align-items: baseline; }
   .uid { font-weight: 600; font-family: ui-monospace, Consolas, monospace; word-break: break-all; }
   .tag { font-size: 11px; padding: 1px 8px; border-radius: 9px; font-weight: 700; white-space: nowrap; }
@@ -1056,7 +1060,7 @@ function render() {
       || (a.age > STALE_S ? a.age - b.age : a.dist - b.dist || (b.d.rssi ?? -999) - (a.d.rssi ?? -999)));
 
   if (!list.length) {
-    $("list").innerHTML = `<div class="empty">${anyConnected() ? "Brak dronów w zasięgu. Płytki nasłuchują…" : "Połącz się z płytką Heltec albo CYD, żeby zobaczyć drony w zasięgu."}</div>`;
+    $("list").innerHTML = `<div class="empty">${anyConnected() ? "Brak dronów w zasięgu. Płytki nasłuchują…" : "Połącz się z płytką Heltec albo CYD, żeby zobaczyć drony w zasięgu."}</div>` + aircraftListHtml();
   } else {
     $("list").innerHTML = list.map(({ k, d, tag, age, est }) => {
       const pos = d.lat !== undefined && me ? geo(me.lat, me.lon, d.lat, d.lon) : null;
@@ -1125,7 +1129,7 @@ function render() {
         </div>`;
       }
       return h + "</div>";
-    }).join("");
+    }).join("") + aircraftListHtml();
   }
   const ci = RidLok.calInfo();
   const offs = Object.entries(ci.off);
@@ -1443,7 +1447,7 @@ const AC_CAT = {
 const AC_EM = { 2: "ALARM", 3: "ratunkowy / medyczny", 4: "brak łączności", 5: "bezprawna ingerencja", 6: "wypadek" };
 const AC_SRC = { 0: "losowy", 5: "ICAO", 6: "FLARM", 7: "OGN", 8: "FANET" };
 const acKind = (a) => AC_CAT[a.cat] || ["statek powietrzny", "p"];
-let acDrawAt = 0;
+let acDrawAt = 0, acSel = null, acRing = null;  // acSel - statek wybrany na liście / mapie
 
 function onAdsl(a) {
   if (a.test || a.lat === undefined) return;  // ADSL test z USB, pakiet bez pozycji
@@ -1486,14 +1490,12 @@ function acText(a, k) {
 function renderAircraft(pts) {
   if (!map) return;
   const now = Date.now();
-  for (const [k, a] of aircraft) {
-    if ((now - a.seen) / 1000 > AC_TTL_S) aircraft.delete(k);
-  }
+  acPrune();
   for (const [k, a] of aircraft) {
     let g = acLayers.get(k);
     if (!g) {
       g = { track: L.polyline([], { color: "#4fd1ff", weight: 1.5, opacity: 0.55, dashArray: "4 4", interactive: false }).addTo(map) };
-      g.mark = L.marker([a.lat, a.lon], { zIndexOffset: 900 }).addTo(map);
+      g.mark = L.marker([a.lat, a.lon], { zIndexOffset: 900 }).addTo(map).on("click", () => focusAircraft(k));
       g.mark.bindTooltip("", { permanent: true, direction: "right", offset: [14, 0], className: "lbl" });
       acLayers.set(k, g);
     }
@@ -1509,6 +1511,55 @@ function renderAircraft(pts) {
     g.track.remove();
     acLayers.delete(k);
   }
+  const sel = acSel && aircraft.get(acSel);
+  if (!sel) { acRing?.remove(); acRing = null; return; }
+  if (!acRing) acRing = L.circleMarker([sel.lat, sel.lon], { radius: 21, color: "#3fb6ff", weight: 3, fill: false, interactive: false }).addTo(map);
+  acRing.setLatLng([sel.lat, sel.lon]).bringToFront();
+}
+
+function focusAircraft(k) {
+  acSel = k;
+  render();
+  document.querySelector(`.card[data-ac="${CSS.escape(k)}"]`)?.scrollIntoView({ behavior: "smooth", block: "center" });
+}
+
+function acPrune() {
+  const now = Date.now();
+  for (const [k, a] of aircraft) if ((now - a.seen) / 1000 > AC_TTL_S) aircraft.delete(k);
+  if (acSel && !aircraft.has(acSel)) acSel = null;
+}
+
+// sekcja listy pod dronami: od najbliższego (bez pozycji tabletu - od najświeższego)
+function aircraftListHtml() {
+  acPrune();
+  if (!aircraft.size) return "";
+  const now = Date.now();
+  const rows = [...aircraft.entries()].map(([k, a]) => ({ k, a, age: (now - a.seen) / 1000, pos: me ? geo(me.lat, me.lon, a.lat, a.lon) : null }))
+    .sort((x, y) => (x.pos && y.pos ? x.pos.dist - y.pos.dist : x.age - y.age));
+  return `<div class="sechead">✈ Statki powietrzne ADS-L (${aircraft.size})</div>` + rows.map(({ k, a, age, pos }) => {
+    const agl = RidAgl.agl(a.lat, a.lon, a.alt, k);
+    const kind = acKind(a);
+    const warn = pos && pos.dist < AC_WARN_M && (agl == null || agl < AC_WARN_AGL) && age <= AC_STALE_S;
+    let h = `<div class="card ac ${kind[1] === "d" ? "acdrone" : ""} ${a.em >= 2 ? "em" : ""} ${age > AC_STALE_S ? "stale" : ""} ${acSel === k ? "sel" : ""}" data-ac="${esc(k)}">
+      <div class="top"><div><div class="uid">${esc(kind[0])}</div>
+        <div style="color:var(--muted);font-size:12px">${esc(AC_SRC[a.amt] || `AMT ${a.amt}`)} ${esc(a.adr)}</div></div>
+        ${a.sim ? '<span class="tag none" style="color:var(--warn);border-color:var(--warn)" title="Statek z symulacji w Heltec - nie jest prawdziwy">SIM</span>' : '<span class="tag none">ADS-L</span>'}</div>`;
+    if (a.em >= 2) h += `<div style="margin-top:4px;color:var(--bad);font-weight:700">⚠ ${esc(AC_EM[a.em] || "alarm")}</div>`;
+    if (warn) h += `<div style="margin-top:4px;color:var(--bad);font-weight:700">⚠ blisko i nisko - uwaga na loty dronów</div>`;
+    if (pos) h += `<div style="margin-top:6px"><span class="dist">${distText(pos.dist)}</span>
+      <span class="arrow" style="transform:rotate(${pos.brg}deg)">↑</span> ${cardinal(pos.brg)} ${Math.round(pos.brg)}°</div>`;
+    h += `<div class="nums">
+      <span>wys. <b>${fmt(a.alt, " m")}</b></span>
+      ${agl != null ? `<span>AGL <b>${fmt(agl, " m")}</b></span>` : ""}
+      <span>prędk. <b>${a.gs !== undefined ? fmt(a.gs * 3.6, " km/h") : "—"}</b></span>
+      ${a.vr !== undefined ? `<span>pion <b>${fmt(a.vr, " m/s", 1)}</b></span>` : ""}
+      <span>kurs <b>${a.trk !== undefined ? fmt(a.trk, "°") : "—"}</b></span>
+      ${!a.sim && a.r !== undefined ? `<span>RSSI <b>${a.r} dBm</b></span>` : ""}
+      <span>${age < 2 ? "teraz" : `${Math.round(age)} s temu`}</span>
+    </div>`;
+    if (acSel === k) h += `<div class="row" style="margin-top:8px"><a href="https://www.google.com/maps/search/?api=1&query=${a.lat},${a.lon}" target="_blank" rel="noopener">statek w Mapach</a></div>`;
+    return h + "</div>";
+  }).join("");
 }
 
 // wiersz pod mapą: ile statków ADS-L, najbliższy i ostrzeżenie, gdy blisko i nisko (ryzyko dla lotu drona)
@@ -1675,6 +1726,17 @@ $("histclear").addEventListener("click", () => {
 $("list").addEventListener("click", async (e) => {
   const card = e.target.closest(".card");
   if (!card) return;
+  if (card.dataset.ac) {  // statek ADS-L: zaznaczenie i pokazanie na mapie
+    if (e.target.closest("a")) return;
+    acSel = acSel === card.dataset.ac ? null : card.dataset.ac;
+    const a = aircraft.get(acSel);
+    if (a && map) {
+      autoFit = false;
+      if (!map.getBounds().pad(-0.15).contains([a.lat, a.lon])) map.panTo([a.lat, a.lon]);
+    }
+    render();
+    return;
+  }
   const k = card.dataset.k, d = drones.get(k);
   if (e.target.dataset?.pin) {  // przypięcie: dron nie znika z listy po czasie
     if (pinned.has(k)) pinned.delete(k); else pinned.add(k);
