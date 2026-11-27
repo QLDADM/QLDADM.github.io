@@ -1025,11 +1025,22 @@ const UA_TYPES = ["", "samolot", "wielowirnikowiec", "wiatrakowiec", "VTOL", "or
 const EU_CATS = ["", "otwarta", "szczególna", "certyfikowana"];
 const OP_LOC = ["miejsce startu", "na żywo", "stała"];
 // model po początku numeru seryjnego: tylko kody potwierdzone na prawdziwych dronach
-const DRONE_MODELS = { "1581F6W8": "DJI Avata 2", "1581F5FJ": "DJI Mavic 3T" };
+// Model z numeru seryjnego Remote ID: DJI = 1581F + kod modelu. Tylko potwierdzone kody (deklaracje zgodności FAA,
+// stan 2023, własny test Avata 2, rejestr FAA - Matrice 4T, katalog IKM - Matrice 4TD). Ta sama tabela jest w rid-cyd/src/models.h - zmieniać razem.
+const DRONE_MODELS = {
+  "1581F6W8": "DJI Avata 2", "1581F4QW": "DJI Avata", "1581F45T": "DJI Mavic 3", "1581F4QZ": "DJI Mavic 3 Cine",
+  "1581F67P": "DJI Mavic 3 Classic", "1581F67Q": "DJI Mavic 3 Pro", "1581F6MK": "DJI Mavic 3 Pro Cine",
+  "1581F5FH": "DJI Mavic 3E", "1581F5FJ": "DJI Mavic 3T", "1581F5FK": "DJI Mavic 3M", "1581F4XF": "DJI Mini 3 Pro",
+  "1581F5YH": "DJI Mini 3", "1581F3YT": "DJI Air 2S", "1581F4Z4": "DJI Inspire 3", "1581F4BN": "DJI Matrice 30",
+  "1581F5BK": "DJI Matrice 30T", "1581F1ZN": "DJI Matrice 300 RTK", "1581F446": "DJI Agras T30",
+  "1581F574": "DJI Agras T40", "1581F08Q3": "DJI Mavic Pro Platinum", "1581F7K3": "DJI Matrice 4T",
+  "1581F8HG": "DJI Matrice 4TD",
+};
 function droneModel(id) {
   if (!id) return null;
   const m = Object.keys(DRONE_MODELS).find((p) => id.startsWith(p));
-  return m ? DRONE_MODELS[m] : id.startsWith("1581") ? "DJI, model nieznany" : null;
+  if (m) return DRONE_MODELS[m];
+  return id.startsWith("1581F") && id.length >= 8 ? `DJI, model nieznany (kod ${id.slice(5, 8)})` : null;
 }
 const HEIGHT_LIMIT_M = 120;
 const LOST_WINDOW_S = 300;
